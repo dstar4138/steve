@@ -1,0 +1,7 @@
+{application, steve,
+ [
+  {description, "Steve Distributed Computation Dispatcher"},
+  {vsn, "0.1.0"},
+  {env, []}
+ ]
+}.
