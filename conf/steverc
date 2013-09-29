@@ -1,0 +1,60 @@
+% Steve Runtime Configuration 
+%   The Steve RC file needs to contain the format of requests handled by this
+%   system, as well as the ability of this current system. Please see the 
+%   documentation for examples.
+
+
+% THE REQUEST FORMAT, NOT ALL OF THESE ARE REQUIRED.
+{requests, [
+    
+    % Task the system will handle; building, runing, build then run.
+        { task, required, [ "build", "run", "build&run" ] },
+
+    % The desired result; compiled result, shell output, or all.
+        { desire, required, [ "res", "out", "all" ] },
+
+    % OS type
+        { os, [ "win", "osx", "linux", "bsd" ] },
+    
+    % OS version
+        { osv, "^\d+(\.\d+\.\d+)?$" },
+
+    % Architecture
+        { arch, ["x86", "x86_64", "arm"] }, 
+
+    % Executables required, list of tuples: {execname, version}
+        { exec, {"[a-z]+", "^\d+(\.\d+\.[\d\*]+)?$" } },
+
+    % Library List, list of tuples: {libary name, version}
+        { lib, {"[a-z]+", "^\d+(\.\d+\.[\d\*]+)?$" } }
+
+]}.
+
+
+% THE CAPABILITY LIST OF THIS MACHINE.
+{ capability, [
+        {task, "run"}, % I don't want to do compiling
+        {desire, "out"}, % Not letting you save files, its all going to get rm
+
+        {os, "linux"},
+        {osv, ["3.5.*","ubuntu"]},
+        {arch, "x86"}]
+  global }. 
+
+%% Executable types:
+{ capability, [ % Python2.7
+    {exec, {"python", "2.7.3"}},
+    {exec, {"python2.7", "2.7.3"}},
+
+    {lib, {"gnupginterface","0.3.2"}}
+    %% ... 
+    ],
+  [ % Actions to take to capture output
+        {run, "python2.7 %filename% > %reqhash%"},
+        {return, {contents, "%reqhash%"}},
+        {delete, {file, "%reqhash%"}},
+        {delete, {file, "%filename"}} 
+  ],
+  instance}.
+
+%% More capabilities.......
