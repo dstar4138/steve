@@ -10,8 +10,10 @@
 %%
 -module(requests).
 
--export([build/2, match/2]).
+%-export([build/2, match/2]).
+-compile(export_all).
 -include("debug.hrl").
+
 
 %%%
 %%% RequestStruct is a list of tuples of the following forms:
@@ -113,33 +115,37 @@ construct( CapabilityList ) ->
 
 
 gi_split( [], Gs, Is ) -> {ok, Gs, Is};
-gi_split( [{A,B,C,global}  |R], Gs, Is ) -> gi_split( R, [{A,B,C}|Gs], Is );
-gi_split( [{A,B,C,instance}|R], Gs, Is)  -> gi_split( R, Gs, [{A,B,C}|Is] ).
+gi_split( [{_,B,global}    |R], Gs, Is ) -> gi_split( R, [B|Gs], Is );
+gi_split( [{_,B,C,instance}|R], Gs, Is)  -> gi_split( R, Gs, [{B,C}|Is] ).
 
 merge_globals( [], Is ) -> {ok, Is};
 merge_globals([G|R], Is) -> merge_globals( R, lists:foldl( merge_global(G),
                                                           [], Is )).
 merge_global( G ) -> 
     SG = lists:keysort(1, G),
-    fun ( I, Is ) -> 
-            SI = lists:keysort( 1, I ),
-            [lists:keymerge( 1, SI, SG )|Is] % TAG in SI takes precidence.
+    fun ( {ITags, IActs}, Is ) -> 
+         SI = lists:keysort( 1, ITags ),
+         [{lists:keymerge( 1, SI, SG ),IActs}|Is] % TAG in SI takes precidence.
     end.
 
 % Loops through all capabilities giving them their CapID. It also breaks them
 % up into a taged list of matchers and a taged list of actions.
 tag_caps( [], TCs, As, _ ) -> {ok, TCs, As};
-tag_caps( [{T,M,A}|R], TCs, As, N ) -> 
-    tag_caps( R, [{N,{T,M}}|TCs], [{N,A}|As], N+1 ).
+tag_caps( [{ITs,IAs}|R], TCs, As, N ) -> 
+    tag_caps( R, [{N,ITs}|TCs], [{N,IAs}|As], N+1 ).
 
 % Builds the capstruct as long as it has a tagged capability list.
-build_capstruct( [], CapStruct=#capstruct{matches=Ms} ) -> 
-    {ok, CapStruct#capstruct{matches=lists:keysort(1, Ms)}};
-build_capstruct( [{CID, {TAG, MATCH}}|R], C=#capstruct{matches=Ms} ) ->
-    NewMs = keyupdate( TAG, {CID,expand_match(MATCH)}, Ms, [] ),
-    build_capstruct(R, C#capstruct{matches=NewMs}).
+build_capstruct( [], CS=#capstruct{matches=Ms} ) ->
+    {ok, CS#capstruct{matches=lists:keysort(1, Ms)}};
+build_capstruct( [{CID,TagList}|R], CS=#capstruct{matches=Matches} ) ->
+    NewMs = lists:foldl( fun( {Tag,M}, Ms ) ->
+                            keyupdate( Tag, {expand_match(M), CID}, Ms ) 
+                         end, Matches, TagList ),
+    build_capstruct( R, CS#capstruct{matches=NewMs} ).
+
 
 % Updates a key/[value] list by appending another value for that key.
+keyupdate( Key, Val, L ) -> keyupdate( Key, Val, L, [] ).
 keyupdate( Key, Val, [], S ) -> [{Key, [ Val ]}|S];
 keyupdate( Key, Val, [{ Key, Prev}|R], S ) -> lists:flatten([{Key,[Val|Prev]},R,S]);
 keyupdate( Key, Val, [X|R], S ) -> keyupdate( Key, Val, R, [X|S] ).
@@ -148,10 +154,12 @@ keyupdate( Key, Val, [X|R], S ) -> keyupdate( Key, Val, R, [X|S] ).
 expand_match( M ) when is_atom(M) -> 
     {raw, M};
 expand_match( M ) when is_tuple(M) -> 
-    {tuple, tuple_size(M), expand_match(tuple_to_list(M))};
+    {tuple, tuple_size(M), lists:foldl( fun(Elem, L) ->
+                                            [expand_match(Elem)|L] 
+                                        end, [], tuple_to_list(M))};
 expand_match( M ) when is_list(M) -> % could be re or list, so check encoding
-    case io_lib:printable_latin1_list( M ) of
-        false -> {list, length(M), lists:foreach( fun expand_match/1, M )};
+    case io_lib:printable_unicode_list( M ) of
+        false -> {list, length(M), lists:map( fun expand_match/1, M )};
         true  -> {ok, MP} = re:compile(M), {re, MP}
     end.
 
@@ -180,7 +188,7 @@ lookup( CID, #capstruct{tagacts=Ts} ) ->
 % Runs through the matcher list from a capstruct, will maintain a list of 
 % possible CIDs that can take care of that particular Task list.
 find_matches( Tasks, MatchList ) -> 
-    find_matches( Tasks, MatchList, {sets:new(), sets:new()}).
+    {ok, find_matches( Tasks, MatchList, {sets:new(), sets:new()}) }.
 find_matches( [], _, {CIDS,_} ) -> sets:to_list(CIDS);
 find_matches( [{T,M}|R], Ms, C) ->
     case lists:keysearch(T,1,Ms) of
@@ -209,25 +217,48 @@ rm_cid( C, {Good, Bad} ) ->
 %% The core of match checking, this will check whether the 
 %% Requested match is equivalent to the provided match. It's written to
 %% take advantage of pattern as much as possible.
-check_match( M, {raw, M} ) when is_atom(M) -> true;
-check_match( M, {re, R} ) when is_list(M) ->
+check_match( M, T={raw, M} ) when is_atom(M) -> 
+    ?DEBUG("atom=>( ~p , ~p )=true~n",[M,T]), true;
+check_match( M, T={re, R} ) when is_list(M) ->
+    ?DEBUG("re=>( ~p , ~p )=",[M,T]),
     case re:run(M,R) of
-        nomatch -> false;
-        {match,_} -> true % possible error, what if partial match.
+        nomatch -> 
+            ?DEBUG("false~n",[]),
+            false;
+        {match,_} -> 
+            ?DEBUG("true~n",[]),
+            true % possible error, what if partial match.
     end;
-check_match( M, {tuple, N, L} ) when is_tuple(M) and tuple_size(M) == N ->
-    case length(lists:filter( fun check_match/2, 
-                             lists:zip(tuple_to_list(M),L) )) 
+check_match( M, T={tuple, N, L} ) when is_tuple(M) -> %andalso tuple_size(M) =:= N ->
+    ?DEBUG("tuple=>( ~p |~p| , ~p )=",[M,tuple_size(M),T]),
+    case length(lists:filter( fun ({A,B}) -> check_match(A,B) end,
+                                        lists:zip(tuple_to_list(M),L) )) 
     of
-        N -> true;
-        _ -> false
+        N -> ?DEBUG("true~n",[]), true;
+        _ -> ?DEBUG("false~n",[]), false
     end;
-check_match( M, {list, N, L} ) when is_list(M) and length(M) == N ->
-    case length(lists:filter( fun check_match/2,
-                              lists:zip(M,L) )) 
-    of
-        N -> true;
-        _ -> false
+check_match( M, T={list, N, L} ) when is_list(M) ->
+    ?DEBUG("list=>( ~p, ~p )=",[M,T]),
+    if length(M) =:= N -> % if lengths are same, then its possible to match
+                case length(lists:filter( fun({A,B}) -> check_match(A,B) end,
+                                            lists:zip(M,L) )) 
+                of
+                    N -> ?DEBUG("true~n",[]), true;
+                    _ -> ?DEBUG("false~n",[]), false
+                end;
+        true -> % Length difference, insta-fail.
+            ?DEBUG("false~n",[]), false
     end;
-check_match( _, _ ) -> false.
+check_match( M, {list, _, L} ) ->
+    % Semantics states that when we (capability provider) provides a list, we 
+    % can match any of the listings.
+    ?DEBUG("OR=>{~n",[]),
+    case length( lists:filter( fun( A ) -> check_match(M, A) end, L ) ) of
+        0 -> ?DEBUG("-->false~n",[]), false;
+        _ -> ?DEBUG("-->true~n",[]), true
+    end,
+    ?DEBUG("}~n",[]);
+check_match( M, T ) -> 
+    ?DEBUG("FAIL=>( ~p , ~p )=false~n",[M,T]),
+    false.
 

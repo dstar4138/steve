@@ -38,7 +38,7 @@
 
         {os, "linux"},
         {osv, ["3.5.*","ubuntu"]},
-        {arch, "x86"}]
+        {arch, "x86"}],
   global }. 
 
 %% Executable types:
