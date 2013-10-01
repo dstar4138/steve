@@ -1,13 +1,10 @@
 -include("util_types.hrl").
+-include("requests.hrl").
 
 %% Reputation of a friend is right now just an integer, but in theory it could
 %% represent something much more elaborate such as a list of past offences or 
 %% tracking information.
 -type 'REPUTATION'() :: integer().
-
-%% Request Filters are used as pattern matches over a node's capability list,
-%% TODO: I'm not sure how this will be set up, so right now its just a map.
--type 'FILTER'() :: [ tuple() ].
 
 %% A Friend is a socket wrapped with some information about who is on the other
 %% end. We read these objects in on load-time and manipulate them only when 
@@ -26,18 +23,6 @@
         sock :: pid() | null
         } ).
 -type 'FRIEND'() :: #friend{}.
-
-%% A Computation Request is a configuration filter with some information 
-%% about the friend who sent (or is sending) the request.
-%% @see steve_request.erl
--record( request, {
-        %% Unique ID of the friend who sent you the request (this could be yours
-        %% if you created this request object).
-        fid :: uid(),
-        %% Configuration filter,
-        filter :: 'FILTER'()
-        } ).
--type 'REQUEST'() :: #request{}.
 
 %% A computation is a reference to a piece of code on the local machine along 
 %% with some boilerplate information about it. It is used to serialize it so it
