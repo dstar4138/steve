@@ -10,10 +10,10 @@
 %%
 -module(requests).
 
-%-export([build/2, match/2]).
--compile(export_all).
--include("debug.hrl").
+-export([build/2, match/2]).
 
+%-compile(export_all).
+-include("debug.hrl").
 
 %%%
 %%% RequestStruct is a list of tuples of the following forms:
@@ -154,13 +154,13 @@ keyupdate( Key, Val, [X|R], S ) -> keyupdate( Key, Val, R, [X|S] ).
 expand_match( M ) when is_atom(M) -> 
     {raw, M};
 expand_match( M ) when is_tuple(M) -> 
-    {tuple, tuple_size(M), lists:foldl( fun(Elem, L) ->
+    {tuple, tuple_size(M), lists:foldr( fun(Elem, L) ->
                                             [expand_match(Elem)|L] 
                                         end, [], tuple_to_list(M))};
 expand_match( M ) when is_list(M) -> % could be re or list, so check encoding
     case io_lib:printable_unicode_list( M ) of
         false -> {list, length(M), lists:map( fun expand_match/1, M )};
-        true  -> {ok, MP} = re:compile(M), {re, MP}
+        true  -> {ok, MP} = re:compile(M), {re, M, MP}
     end.
 
 
@@ -219,7 +219,7 @@ rm_cid( C, {Good, Bad} ) ->
 %% take advantage of pattern as much as possible.
 check_match( M, T={raw, M} ) when is_atom(M) -> 
     ?DEBUG("atom=>( ~p , ~p )=true~n",[M,T]), true;
-check_match( M, T={re, R} ) when is_list(M) ->
+check_match( M, T={re, _O, R} ) when is_list(M) ->
     ?DEBUG("re=>( ~p , ~p )=",[M,T]),
     case re:run(M,R) of
         nomatch -> 
@@ -253,11 +253,11 @@ check_match( M, {list, _, L} ) ->
     % Semantics states that when we (capability provider) provides a list, we 
     % can match any of the listings.
     ?DEBUG("OR=>{~n",[]),
-    case length( lists:filter( fun( A ) -> check_match(M, A) end, L ) ) of
+    X = case length( lists:filter( fun( A ) -> check_match(M, A) end, L ) ) of
         0 -> ?DEBUG("-->false~n",[]), false;
         _ -> ?DEBUG("-->true~n",[]), true
     end,
-    ?DEBUG("}~n",[]);
+    ?DEBUG("}~n",[]), X;
 check_match( M, T ) -> 
     ?DEBUG("FAIL=>( ~p , ~p )=false~n",[M,T]),
     false.

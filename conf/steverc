@@ -43,8 +43,9 @@
 
 %% Executable types:
 { capability, [ % Python2.7
-    {exec, {"python", "2.7.3"}},
-    {exec, {"python2.7", "2.7.3"}},
+    {exec, [ {"python", "2.7.3"},
+             {"python2.7", "2.7.3"}
+           ]}, % Accepts either executable.
 
     {lib, {"gnupginterface","0.3.2"}}
     %% ... 
