@@ -15,16 +15,19 @@ daemon:
 	
 ## Compile our Client code.
 client:
-	cd apps/stevecli; make
+	git submodule init
+	git submodule update
+	cd apps/SteveClient; make
 
 ## Superficial clean of workspace
 clean:
 	$(REBAR) clean
-	cd apps/stevecli; make clean
+	cd apps/SteveClient; make clean
 
 ## Total whipe of all releases and generated scripts.
 distclean: clean
-	-rm start_steve.sh
+	-rm -rf apps/SteveClient
+	-rm bin/steve.sh
 	-rm -rf rel
 
 ## Build a daemon release.
@@ -43,10 +46,10 @@ crelease: client
 
 ## Ease-of-Use scripts for quick launching and linking to.
 scripts:
-	touch start_steve.sh
-	@echo "#!/bin/sh" > start_steve.sh
-	@echo "$(RELDIR)/steve/bin/steve start" >> start_steve.sh
-	chmod +x start_steve.sh
+	touch bin/steve.sh
+	@echo "#!/bin/sh" > bin/steve.sh
+	@echo "$(RELDIR)/steve/bin/steve " $$"@" >> bin/steve.sh
+	chmod +x bin/steve.sh
 
 ## Make everything including the scripts.
 all: drelease crelease scripts

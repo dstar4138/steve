@@ -1,0 +1,3 @@
+[submodule "apps/SteveClient"]
+	path = apps/SteveClient
+	url = git://github.com/pdg6868/SteveClient.git
