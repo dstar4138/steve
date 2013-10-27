@@ -7,7 +7,7 @@
 -include("debug.hrl").
 
 %% Application callbacks
--export([start/2, stop/1]).
+-export([start/2, prep_stop/1, stop/1]).
 
 %%%===================================================================
 %%% Application callbacks
@@ -29,8 +29,21 @@
 %%      StartArgs = term()
 %% @end
 %%--------------------------------------------------------------------
-start(_StartType, _StartArgs) ->
-    steve_sup:start_link(). %TODO: Get Configuraiton File.
+start(_StartType, StartArgs) ->
+    ?DEBUG("Starting Steve Daemon...",[]),
+    steve_sup:start_link( StartArgs ).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Called by the application module right before shutting the rest of 
+%% the system down. We modify and use this for debugging.
+%%
+%% @spec prep_stop( State ) -> ok.
+%% @end
+%%--------------------------------------------------------------------
+prep_stop( _State ) ->
+    ?DEBUG("Stopping Steve Daemon...",[]),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private

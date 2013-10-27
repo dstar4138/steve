@@ -8,7 +8,7 @@
 -include("steve_obj.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -18,7 +18,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, {}).
+-record(steve_state, {}).
 
 %%%===================================================================
 %%% API
@@ -31,8 +31,9 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+start_link( StartArgs ) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], StartArgs).
+
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -43,14 +44,12 @@ start_link() ->
 %% @doc
 %% Initializes the server
 %%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
+%% @spec init(Args) -> {ok, State} 
 %% @end
 %%--------------------------------------------------------------------
-init([]) ->
-    {ok, #state{}}.
+init( StartArgs ) ->
+    State = parse_args(StartArgs),
+    {ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -124,3 +123,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+% Parses the incoming arguments and creates Steve's internal state machine.
+parse_args( Args ) -> 
+    ?DEBUG("StartArgs = ~p",[Args]),
+    %TODO: Broadcast request for update.
+    #steve_state{}.
+
+

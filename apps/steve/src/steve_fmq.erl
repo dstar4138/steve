@@ -1,23 +1,16 @@
-%% Steve Connection Server
-%%  Maintains connections via TCP to friends or clients and handles incoming 
-%%  and outgoing message queues process groups. See steve_sup to see how the
-%%  two instances of steve_conn are started.
-%%
-%% @author Alexander Dean
-%%
--module(steve_conn).
+%% Friend Message Queue
+%%  A Queue used by steve_conn to handle message forwarding and broadcasting to
+%%  other friends. It also knows how to manipulate and handle messages meeting
+%%  the api.
+
+-module(steve_fmq).
 -behaviour(gen_server).
 -include("debug.hrl").
 
-% Name of the thread pool used for broadcasting.
--define(DEFAULT_GROUP, clients).
-% Default message queue implementation.
--define(DEFAULT_MQ, steve_cmq).
-% A default ephemeral port
--define(DEFAULT_PORT, 50505).
 
 %% API
--export([start_link/0,start_link/3]).
+-export([start_link/1]).
+
 
 %% gen_server callbacks
 -export([init/1,
@@ -27,8 +20,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, { port, group, mq, wsock }).
-               
+-record(state, {sock, friend = nil}).
 
 %%%===================================================================
 %%% API
@@ -41,17 +33,9 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [ ?DEFAULT_GROUP, 
-                                                       ?DEFAULT_MQ,
-                                                       ?DEFAULT_PORT
-                                                     ], []).
+start_link( Socket ) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Socket], []).
 
-start_link( WorkGroup, MqModule, Port ) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [ WorkGroup,
-                                                       MqModule,
-                                                       Port
-                                                     ], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -68,11 +52,15 @@ start_link( WorkGroup, MqModule, Port ) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Group, MqMod, Port]) ->
-    process_flag(trap_exit, true),
-    ok = pg:create( Group ),
-    {ok, WSock} = gen_tcp:listen(Port,[{active,true}]),
-    {ok, #state{port=Port, group=Group, mq=MqMod, wsock=WSock}, 0}.
+init([Socket]) ->
+    {ok, SockData} = inet:peername( Socket ),
+    FriendData = case steve_state:get_friend( SockData ) of
+        {ok, FD} -> FD;
+        unknown -> 
+            ?DEBUG("Unknown friend connecting from: ~p",[SockData]),
+            unknown
+    end,
+    {ok, #state{sock=Socket, friend = FriendData}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -88,9 +76,7 @@ init([Group, MqMod, Port]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call( Request, From, State) -> 
-    ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p~n",[Request, From, State]),
-    {stop, badarg, State}.
+handle_call(_Request, _From, State) -> {reply, ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -102,9 +88,7 @@ handle_call( Request, From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast( Msg, State) ->
-    ?DEBUG("Conn server should not be getting casts (~p): ~p~n",[Msg,State]),
-    {stop,badarg,State}.
+handle_cast(_Msg, State) -> {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -116,11 +100,7 @@ handle_cast( Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, Sock, RawData}, State) ->
-    create_mq( Sock, RawData, State ),
-    {noreply, State};
-handle_info(timeout, State=#state{wsock=WS}) ->
-    {ok,_} = gen_tcp:accept(WS),
+handle_info(_Info, State) ->
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -134,7 +114,7 @@ handle_info(timeout, State=#state{wsock=WS}) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, State) -> shutdown_mqs( State ), close_sock( State ), ok.
+terminate(_Reason, _State) -> ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -149,19 +129,3 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-% Creates and links to a Friend Message Queue in a particular work group.
-create_mq( Sock, RawData, #state{group=G,mq=Mq} ) ->
-    ?DEBUG("Recieved raw data: ~p",[RawData]),
-    {ok, Pid} = Mq:start_link( Sock ),
-    link(Pid), pg:join(G,Pid),
-    ok.
-
-% Send a shutdown message to all message queues.
-shutdown_mqs( #state{group=G} ) ->
-    pg:send(G, shutdown).
-
-% Using the state, shut down the opened socket before termination.
-close_sock( #state{wsock=WS} ) ->
-    gen_tcp:close( WS ).
-

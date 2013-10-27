@@ -6,27 +6,15 @@
 %% @author Alexander Dean
 -module(steve_comp_sup).
 -behaviour(supervisor).
+
 -include("debug.hrl").
 
 %% API
 -export([start_link/0]).
+-export([start_computation/1, stop_computation/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
-
--define(CSUP_INIT, {ok, {
-    {simple_one_for_one, 0, 1},  % Don't start computations on your own 
-                                 % (steve_state will tell you). If this crashes
-                                 % we're gunna have a bad time, so handle later.
-    [{steve_comp, 
-        {steve_comp, start_link, []},  
-        temporary,  % If it crashes, don't restart. Steve will know and handle.
-        5000,
-        worker,
-        [steve_comp]} 
-    ]}}).
-
-
 
 %%%===================================================================
 %%% API functions
@@ -41,6 +29,29 @@
 %%--------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%%  Starts a computation worker process.
+%%
+%% @spec start_computation( ActionList ) -> {ok, Pid} 
+%% @end
+%%--------------------------------------------------------------------
+start_computation( Args ) ->
+    ?DEBUG("Starting Computation (~p)~n",[Args]),
+    supervisor:start_child(?MODULE, Args).
+
+%%--------------------------------------------------------------------
+%% @doc
+%%  Stops a computation worker process.
+%%
+%% @spec stop_computation( Pid ) -> ok.
+%% @end
+%%--------------------------------------------------------------------
+stop_computation( Pid ) ->
+    ?DEBUG("Stopping Computation (~p)~n", [Pid]),
+    supervisor:stop_child(?MODULE, Pid).
+
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -59,5 +70,18 @@ start_link() ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([]) -> ?CSUP_INIT().
+init([]) -> 
+    % Don't start computations on your own 
+    % (steve_state will tell you). If this crashes
+    % we're gunna have a bad time, so handle later.
+    SupFlags = {simple_one_for_one, 0, 1}, 
+
+    Worker = { undefined, 
+               {steve_comp, start_link, []},  
+               temporary,
+               brutal_kill,
+               worker,
+               [steve_comp] }, 
+
+    {ok, { SupFlags, [ Worker ] }}.
 

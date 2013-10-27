@@ -1,23 +1,14 @@
-%% Steve Connection Server
-%%  Maintains connections via TCP to friends or clients and handles incoming 
-%%  and outgoing message queues process groups. See steve_sup to see how the
-%%  two instances of steve_conn are started.
+%% Client Message Queue
+%%   Follows the CAPI for communicating using JSON over TCP with a client. The
+%%   message queue is being used to hold messages until a client reconnects.
 %%
 %% @author Alexander Dean
-%%
--module(steve_conn).
+-module(steve_cmq).
 -behaviour(gen_server).
 -include("debug.hrl").
 
-% Name of the thread pool used for broadcasting.
--define(DEFAULT_GROUP, clients).
-% Default message queue implementation.
--define(DEFAULT_MQ, steve_cmq).
-% A default ephemeral port
--define(DEFAULT_PORT, 50505).
-
 %% API
--export([start_link/0,start_link/3]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -27,8 +18,12 @@
          terminate/2,
          code_change/3]).
 
--record(state, { port, group, mq, wsock }).
-               
+-record(state, {
+                sock, % Listening socket.
+                cid,  % Client ID for internal reference.
+                msgs, % Messages waiting to send out to client.
+                old_stream = nil % Current stream needing to parse.
+               }).
 
 %%%===================================================================
 %%% API
@@ -41,17 +36,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [ ?DEFAULT_GROUP, 
-                                                       ?DEFAULT_MQ,
-                                                       ?DEFAULT_PORT
-                                                     ], []).
-
-start_link( WorkGroup, MqModule, Port ) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [ WorkGroup,
-                                                       MqModule,
-                                                       Port
-                                                     ], []).
+start_link( Socket ) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Socket], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -68,11 +54,8 @@ start_link( WorkGroup, MqModule, Port ) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Group, MqMod, Port]) ->
-    process_flag(trap_exit, true),
-    ok = pg:create( Group ),
-    {ok, WSock} = gen_tcp:listen(Port,[{active,true}]),
-    {ok, #state{port=Port, group=Group, mq=MqMod, wsock=WSock}, 0}.
+init([Socket]) ->
+    {ok, #state{sock=Socket}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -88,9 +71,8 @@ init([Group, MqMod, Port]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call( Request, From, State) -> 
-    ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p~n",[Request, From, State]),
-    {stop, badarg, State}.
+handle_call(_Request, _From, State) ->
+    {reply, error, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -102,9 +84,8 @@ handle_call( Request, From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast( Msg, State) ->
-    ?DEBUG("Conn server should not be getting casts (~p): ~p~n",[Msg,State]),
-    {stop,badarg,State}.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -116,12 +97,25 @@ handle_cast( Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, Sock, RawData}, State) ->
-    create_mq( Sock, RawData, State ),
-    {noreply, State};
-handle_info(timeout, State=#state{wsock=WS}) ->
-    {ok,_} = gen_tcp:accept(WS),
-    {noreply, State}.
+handle_info({tcp, _Socket, RawData}, State = #state{ old_stream = S }) ->
+    case capi:parse( RawData, S ) of
+        {ok, Msgs, NewS} -> 
+            process( Msgs ), 
+            {noreply, State#state{old_stream=NewS}};
+        {error, Msgs, Err} ->
+            process( Msgs ), 
+            handle_error( Err ),
+            {noreply, State}
+    end;
+handle_info( {pg_message, _From, _PgName, {shutdown, Cid}}, 
+              State = #state{sock=S, cid=Cid} ) ->
+    gen_tcp:close(S),
+    {stop, normal, State};
+handle_info( {pg_message, _From, _PgName, shutdown}, 
+              State = #state{sock=S}) ->
+    gen_tcp:close(S),
+    {stop, normal, State};
+handle_info(_Info, State) -> {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -134,7 +128,7 @@ handle_info(timeout, State=#state{wsock=WS}) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, State) -> shutdown_mqs( State ), close_sock( State ), ok.
+terminate(_Reason, _State) -> ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -150,18 +144,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%% Internal functions
 %%%===================================================================
 
-% Creates and links to a Friend Message Queue in a particular work group.
-create_mq( Sock, RawData, #state{group=G,mq=Mq} ) ->
-    ?DEBUG("Recieved raw data: ~p",[RawData]),
-    {ok, Pid} = Mq:start_link( Sock ),
-    link(Pid), pg:join(G,Pid),
-    ok.
-
-% Send a shutdown message to all message queues.
-shutdown_mqs( #state{group=G} ) ->
-    pg:send(G, shutdown).
-
-% Using the state, shut down the opened socket before termination.
-close_sock( #state{wsock=WS} ) ->
-    gen_tcp:close( WS ).
+handle_error( Err ) -> ?DEBUG("EMIT ERROR: ~p~n",[Err]), ok.
+process( [] ) -> ok;
+process( [H|R] ) -> ?DEBUG("PROCESS MSG: ~p~n",[H]), process( R ).
 
