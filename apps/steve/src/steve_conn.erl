@@ -62,10 +62,7 @@ start_link( WorkGroup, MqModule, Port ) ->
 %% @doc
 %% Initializes the server
 %%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
+%% @spec init(Args) ->  {ok, State, Timeout}
 %% @end
 %%--------------------------------------------------------------------
 init([Group, MqMod, Port]) ->
@@ -76,17 +73,7 @@ init([Group, MqMod, Port]) ->
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling call messages
-%%
-%% @spec handle_call(Request, From, State) ->
-%%                                   {reply, Reply, State} |
-%%                                   {reply, Reply, State, Timeout} |
-%%                                   {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, Reply, State} |
-%%                                   {stop, Reason, State}
-%% @end
+%% @doc Handling call messages, currently unused.
 %%--------------------------------------------------------------------
 handle_call( Request, From, State) -> 
     ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p~n",[Request, From, State]),
@@ -94,13 +81,7 @@ handle_call( Request, From, State) ->
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @spec handle_cast(Msg, State) -> {noreply, State} |
-%%                                  {noreply, State, Timeout} |
-%%                                  {stop, Reason, State}
-%% @end
+%% @doc Handling cast messages, currently unused.
 %%--------------------------------------------------------------------
 handle_cast( Msg, State) ->
     ?DEBUG("Conn server should not be getting casts (~p): ~p~n",[Msg,State]),
@@ -111,9 +92,7 @@ handle_cast( Msg, State) ->
 %% @doc
 %% Handling all non call/cast messages
 %%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
+%% @spec handle_info(Info, State) -> {noreply, State} 
 %% @end
 %%--------------------------------------------------------------------
 handle_info({tcp, Sock, RawData}, State) ->

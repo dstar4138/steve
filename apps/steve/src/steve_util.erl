@@ -4,9 +4,13 @@
 -include("debug.hrl").
 -include("util_types.hrl").
 
+% We want a proplist back rather than a stuct or eep18.
+-define(JSONX_OPTIONS, [{format,proplist}]).
+
 -export([uuid/0, valid_uuid/1]).
 -export([hash/1]).
 -export([loadrc/1, readfile/1, clean_path/1]).
+-export([encode_json/1, decode_json/1]).
 
 
 %% @doc Follows RFC4122 for generating UUIDs version 4 via Random Numbers. 
@@ -34,6 +38,16 @@ valid_uuid( UID ) when is_binary( UID ) ->
 %% @end
 -spec hash( binary() ) -> hash().
 hash( Blob ) when is_binary( Blob ) -> erlang:phash2( Blob ).
+
+
+%% @doc Use the JSONx Library for decoding a binary Json message.
+-spec decode_json( binary() ) -> term().
+decode_json( Binary ) -> jsonx:decode( Binary, ?JSONX_OPTIONS ).
+
+
+%% @doc Use the JSONx Library for encoding a binary Json message.
+-spec encode_json( term() ) -> binary().
+encode_json( Term ) -> jsonx:encode( Term ).
 
 
 %% @doc Interpret a RC file by reading it in and evaluating it.

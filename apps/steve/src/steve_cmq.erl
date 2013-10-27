@@ -20,9 +20,7 @@
 
 -record(state, {
                 sock, % Listening socket.
-                cid,  % Client ID for internal reference.
-                msgs, % Messages waiting to send out to client.
-                old_stream = nil % Current stream needing to parse.
+                cid   % Client ID for internal reference.
                }).
 
 %%%===================================================================
@@ -59,30 +57,14 @@ init([Socket]) ->
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling call messages
-%%
-%% @spec handle_call(Request, From, State) ->
-%%                                   {reply, Reply, State} |
-%%                                   {reply, Reply, State, Timeout} |
-%%                                   {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, Reply, State} |
-%%                                   {stop, Reason, State}
-%% @end
+%% @doc Handling call messages, currently unused.
 %%--------------------------------------------------------------------
 handle_call(_Request, _From, State) ->
     {reply, error, State}.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @spec handle_cast(Msg, State) -> {noreply, State} |
-%%                                  {noreply, State, Timeout} |
-%%                                  {stop, Reason, State}
-%% @end
+%% @doc Handling cast messages, currently unused.
 %%--------------------------------------------------------------------
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -97,14 +79,12 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({tcp, _Socket, RawData}, State = #state{ old_stream = S }) ->
-    case capi:parse( RawData, S ) of
-        {ok, Msgs, NewS} -> 
-            process( Msgs ), 
-            {noreply, State#state{old_stream=NewS}};
-        {error, Msgs, Err} ->
-            process( Msgs ), 
-            handle_error( Err ),
+handle_info({tcp, _Socket, RawData}, State ) ->
+    case capi:parse( RawData ) of
+        {ok, Msg} -> 
+            process( Msg , State );
+        {error, Err} ->
+            handle_error( Err, State ),
             {noreply, State}
     end;
 handle_info( {pg_message, _From, _PgName, {shutdown, Cid}}, 
@@ -144,7 +124,24 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%% Internal functions
 %%%===================================================================
 
-handle_error( Err ) -> ?DEBUG("EMIT ERROR: ~p~n",[Err]), ok.
-process( [] ) -> ok;
-process( [H|R] ) -> ?DEBUG("PROCESS MSG: ~p~n",[H]), process( R ).
+%% @hidden
+%% @doc Send an error as a message back over the wire.
+handle_error( Err, _State = #state{sock=S} ) -> 
+    gen_tcp:send( S, steve_util:encode_json([{<<"error">>,Err}]) ).
+
+%% @hidden
+%% @doc Send message to state server for processing, wait for reply and either
+%% forward over wire or ignore.
+%% @end
+process( Msg , State = #state{sock=S}) ->
+    case steve_state:process_cmsg( Msg ) of
+        {reply, Rep} -> 
+            gen_tcp:send( S, steve_util:encode_json(Rep) ),
+            {noreply, State};            
+        {reply, Rep, Cid} ->
+            gen_tcp:send( S, steve_util:encode_json(Rep) ),
+            {noreply, State#state{cid=Cid}};
+        noreply -> {noreply, State};
+        {shutdown, Reason} -> {stop, Reason, State}
+    end.
 
