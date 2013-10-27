@@ -58,11 +58,29 @@ try. Check the Building and Deploying sections below. If you think you can
 change him, send us a pull request and we'll take a look at it. 
 
 
+REQUIREMENTS:
+
+  Steve only needs a few things to get started:
+    
+    - Erlang (minimum version R15B01)
+
+
 BUILDING:
 
-    ---TODO---
+  There are two parts that need to be built, the Daemon service that runs in the
+background, and the Client that you can use to connect and utilize the Daemon.
+To build both and start working with them, make sure your system meets the 
+requirements above and type:
+
+    make all
+
+This will compile both parts, then build a release directory 'rel'. It will also
+make a couple useful scripts you can add to your path for starting/stoping the
+Daemon and for launching the client.
+ 
 
 DEPLOYING:
 
     ---TODO---
+
 

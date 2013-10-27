@@ -11,13 +11,16 @@ RELTOOL_CFG=$(CURDIR)/conf/reltool.config
 
 ## Compile the Daemon code.
 daemon: 
-	$(REBAR) compile 
+	$(REBAR) get-deps compile 
 	
 ## Compile our Client code.
 client:
 	git submodule init
 	git submodule update
 	cd apps/SteveClient; make
+
+test: daemon
+	$(REBAR) eunit
 
 ## Superficial clean of workspace
 clean:
@@ -40,7 +43,7 @@ drelease: daemon
 ## Build the client release. ##TODO: push client release code to rel/client/.
 crelease: client
 	-mkdir -p $(RELDIR)/client
-	cd apps/stevecli; make release
+	#cd apps/SteveClient; make release
 	@echo "_WARNING_: COULDNT COPY CLIENT REL"
 
 
