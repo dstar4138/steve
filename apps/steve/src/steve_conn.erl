@@ -190,8 +190,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 % Creates and links to a Friend Message Queue in a particular work group.
 create_mq( Sock, #state{group=G,mq=Mq} ) ->
-    {ok, Pid} = Mq:start_link( Sock ),
-    link(Pid), pg:join(G, Pid),
+    {ok, Pid} = spawn_link( Mq, start_link, [Sock] ),
+    pg:join(G, Pid),
     ok.
 
 % Send a shutdown message to all message queues.
