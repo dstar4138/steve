@@ -156,6 +156,10 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
 handle_info( {inet_async, _ListSock, _Ref, Error}, State ) ->
     ?ERROR("steve_conn:handle_info", "Error in socket acceptor: ~p.", [Error]),
     {stop, Error, State};
+handle_info( {'EXIT', _Pid, Status}, State ) ->
+    ?ERROR("steve_conn:handle_info", "Message Queue crashed with message: ~p",[Status]),
+    {noreply, State};
+
 handle_info( Msg, State ) ->
     ?DEBUG("Conn server should not be getting misc msgs ( ~p ):~p",[Msg,State]),
     {noreply, State}.
