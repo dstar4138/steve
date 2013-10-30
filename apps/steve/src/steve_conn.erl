@@ -3,6 +3,8 @@
 %%  and outgoing message queues process groups. See steve_sup to see how the
 %%  two instances of steve_conn are started.
 %%
+%%  This uses the async method demo'ed by Serge Aleynikov at erlangcentral.org.
+%%
 %% @author Alexander Dean
 %%
 -module(steve_conn).
@@ -17,6 +19,9 @@
 -define(DEFAULT_PORT, 50505).
 % The name of the gen_server process made by using Group.
 -define(MOD( G ), erlang:list_to_atom( erlang:atom_to_list( G ) ++ "_serve" )).
+% The socket options for the Welcome Socket.
+-define(SOCK_OPTS,[binary, {packet,2}, {reuseaddr,true}, {keepalive, true}, 
+                   {backlog, 30}, {active,false}]).
 
 %% API
 -export([start_link/0,start_link/3]).
@@ -30,7 +35,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, { port, group, mq, wsock }).
+-record(state, { port, group, mq, wsock, ref }).
           
 
 %%%===================================================================
@@ -90,9 +95,16 @@ start_link( WorkGroup, MqModule, Port ) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Group, MqMod, Port]) ->
+    process_flag(trap_exit, true),
     ok = create_group( Group ),
-    {ok, WSock} = gen_tcp:listen(Port,[{active,true}]),
-    {ok, #state{port=Port, group=Group, mq=MqMod, wsock=WSock}, 0}.
+    case gen_tcp:listen( Port, ?SOCK_OPTS ) of
+        {ok, WSock} ->
+            % Create first accepting process.
+            {ok, Ref} = prim_inet:async_accept( WSock, -1 ),
+            {ok, #state{port=Port, group=Group, mq=MqMod, wsock=WSock, ref=Ref}};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -108,7 +120,7 @@ handle_call( Request, From, State) ->
 %%--------------------------------------------------------------------
 handle_cast( Msg, State) ->
     ?DEBUG("Conn server should not be getting casts (~p): ~p",[Msg,State]),
-    {stop,badarg,State}.
+    {stop, badarg, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -118,20 +130,32 @@ handle_cast( Msg, State) ->
 %% @spec handle_info(Info, State) -> {noreply, State} 
 %% @end
 %%--------------------------------------------------------------------
+handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
+            #state{ wsock=WSock, ref=Ref } = State) ->
+    try 
+        case set_sockopt( WSock, CliSocket ) of
+            ok -> ok;
+            {error, Reason} -> exit({set_sockopt, Reason})
+        end,
 
-handle_info({tcp_closed, Sock}, State)-> 
-    ?DEBUG("TCP CLOSED",[]),
-    {noreply,State};
-handle_info({tcp_error, Sock}, State) -> 
-    ?DEBUG("TCP ERROR",[]),
-    {noreply,State};
-handle_info({tcp, Sock, RawData}, State) ->
-    create_mq( Sock, RawData, State ),
-    {noreply, State};
-handle_info(timeout, State=#state{wsock=WS}) ->
-    {ok,_} = gen_tcp:accept(WS),
-    {noreply, State};
+        %% New client connected - spawn a new process using the message queue
+        %% implementation passed in on init.
+        ok = create_mq( CliSocket, State ),
 
+        %% Signal the network driver that we are ready to accept another 
+        %% connection.
+        case prim_inet:async_accept(ListSock, -1) of
+            {ok,    NewRef} -> ok;
+            {error, NewRef} -> exit({async_accept, inet:format_error(NewRef)})
+        end,
+        {noreply, State#state{ref=NewRef}}
+    catch exit:Why ->
+            ?ERROR("steve_conn:handle_info","Error in async accept conn: ~p.",[Why]),
+            {stop, Why, State}
+    end;
+handle_info( {inet_async, _ListSock, _Ref, Error}, State ) ->
+    ?ERROR("steve_conn:handle_info", "Error in socket acceptor: ~p.", [Error]),
+    {stop, Error, State};
 handle_info( Msg, State ) ->
     ?DEBUG("Conn server should not be getting misc msgs ( ~p ):~p",[Msg,State]),
     {noreply, State}.
@@ -165,10 +189,9 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 
 % Creates and links to a Friend Message Queue in a particular work group.
-create_mq( Sock, RawData, #state{group=G,mq=Mq} ) ->
-    ?DEBUG("Recieved raw data: ~p",[RawData]),
+create_mq( Sock, #state{group=G,mq=Mq} ) ->
     {ok, Pid} = Mq:start_link( Sock ),
-    link(Pid), pg:join(G,Pid),
+    link(Pid), pg:join(G, Pid),
     ok.
 
 % Send a shutdown message to all message queues.
@@ -186,3 +209,19 @@ create_group( Group ) ->
         {error, already_created} -> ok;
         Err -> Err
     end.
+
+%% Taken from prim_init. We are merely copying some socket options from the 
+%% listening socket to the new client socket.
+set_sockopt( ListSock, CliSocket) ->
+    true = inet_db:register_socket( CliSocket, inet_tcp ),
+    case prim_inet:getopts( ListSock, 
+                [active, nodelay, keepalive, delay_send, priority, tos] ) 
+    of
+        {ok, Opts} ->
+            case prim_inet:set_opts(CliSocket, Opts) of
+                ok -> ok;
+                Error -> gen_tcp:close(CliSocket), Error
+            end;
+        Error -> gen_tcp:close(CliSocket), Error
+    end.
+

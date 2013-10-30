@@ -53,6 +53,7 @@ start_link( Socket ) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Socket]) ->
+    ok = gen_tcp:controlling_process( Socket, self() ),
     {ok, SockData} = inet:peername( Socket ),
     FriendData = case steve_state:get_friend( SockData ) of
         {ok, FD} -> FD;
