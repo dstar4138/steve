@@ -190,7 +190,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 % Creates and links to a Friend Message Queue in a particular work group.
 create_mq( Sock, #state{group=G,mq=Mq} ) ->
-    {ok, Pid} = spawn_link( Mq, start_link, [Sock] ),
+    Pid = spawn_link( Mq, start_link, [Sock] ),
+    gen_tcp:controlling_process( Sock, Pid ),
     pg:join(G, Pid),
     ok.
 
@@ -218,7 +219,7 @@ set_sockopt( ListSock, CliSocket) ->
                 [active, nodelay, keepalive, delay_send, priority, tos] ) 
     of
         {ok, Opts} ->
-            case prim_inet:set_opts(CliSocket, Opts) of
+            case prim_inet:setopts(CliSocket, Opts) of
                 ok -> ok;
                 Error -> gen_tcp:close(CliSocket), Error
             end;

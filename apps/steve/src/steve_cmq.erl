@@ -53,7 +53,6 @@ start_link( Socket ) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Socket]) ->
-    ok = gen_tcp:controlling_process( Socket, self() ),
     {ok, #state{sock=Socket}}.
 
 %%--------------------------------------------------------------------
