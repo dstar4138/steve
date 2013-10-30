@@ -3,6 +3,7 @@
   {description, "Steve Distributed Computation Dispatcher"},
   {vsn, "0.1.0"},
   {registered, [steve]},
+  {applications, [kernel, stdlib]},
   {mod, {steve_app, []}},
   {env, 
    [        % Default Requests Configuration File Location

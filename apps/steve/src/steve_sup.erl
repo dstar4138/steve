@@ -16,6 +16,8 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+-define(NCHILD(ID, Mod, Type, Args), {ID, {Mod, start_link, Args},
+                                     permanent, 5000, Type, [Mod]}).
 -define(CHILD(Mod, Type, Args), {Mod, {Mod, start_link, Args},
                                      permanent, 5000, Type, [Mod]}).
 
@@ -51,13 +53,14 @@ start_link( StartArgs ) ->
 %% @end
 %%--------------------------------------------------------------------
 init( StartArgs ) ->
+    process_flag(trap_exit, true),
     {ok, PPort, CPort} = get_conn_ports(),
     {ok, RCFile} = get_rcfile(),
     {ok, {{one_for_one, 5, 10}, [
-                ?CHILD(steve_conn, worker, [friends, steve_fmq, PPort]), % Peer Server
-                ?CHILD(steve_conn, worker, [clients, steve_cmq, CPort]), % Client Server
-                ?CHILD(steve_comp_sup, supervisor, []), % Computation Server
-                ?CHILD(steve_state, worker, [{rcfile,RCFile}|StartArgs]) % State Server
+                ?NCHILD(fconn, steve_conn, worker, [friends, steve_fmq, PPort]) % Peer Server
+               ,?NCHILD(cconn, steve_conn, worker, [clients, steve_cmq, CPort]) % Client Server
+               ,?CHILD(steve_comp_sup, supervisor, []) % Computation Server
+               ,?CHILD(steve_state, worker, [{rcfile,RCFile}|StartArgs]) % State Server
          ]}}.
 
 %%%===================================================================

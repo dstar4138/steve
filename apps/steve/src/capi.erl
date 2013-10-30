@@ -25,6 +25,12 @@ parse( RawData ) ->
         Val -> decode(Val)
     end.
 
+%% @doc Encodes a CAPI message (from server) into a binary string that can be
+%% sent back to Client.
+%% @end
+-spec encode( cmsg() ) -> binary().
+encode( Msg ) -> ok. %XXX: make cmsg into binary using steve_util:encode_json/1.
+
 
 %% ===========================================================================
 %% Internal Functions

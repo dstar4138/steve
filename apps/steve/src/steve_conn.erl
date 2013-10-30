@@ -15,9 +15,12 @@
 -define(DEFAULT_MQ, steve_cmq).
 % A default ephemeral port
 -define(DEFAULT_PORT, 50505).
+% The name of the gen_server process made by using Group.
+-define(MOD( G ), erlang:list_to_atom( erlang:atom_to_list( G ) ++ "_serve" )).
 
 %% API
 -export([start_link/0,start_link/3]).
+-export([get_friend_count/0, get_client_count/0, check_mq_group/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -28,11 +31,30 @@
          code_change/3]).
 
 -record(state, { port, group, mq, wsock }).
-               
+          
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc Gets the number of currently connected Peers/Friends.
+-spec get_friend_count() -> non_neg_integer().
+get_friend_count() -> length( check_mq_group( friends ) ).
+
+%% @doc Gets the number of currently connected Clients.
+-spec get_client_count() -> non_neg_integer().
+get_client_count() -> length( check_mq_group( clients ) ).
+
+
+%% @doc Get a list of process id's of all message queues in a particular 
+%% process group. There are only two groups, firends | clients. See 
+%% steve_sup for more information.
+%% @end
+check_mq_group( Group ) ->
+    case catch pg:members( Group ) of
+        L when is_list(L) -> L;
+        _ -> []
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -42,13 +64,15 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [ ?DEFAULT_GROUP, 
+    gen_server:start_link({local, ?MOD(?DEFAULT_GROUP)}, ?MODULE, [ 
+                                                       ?DEFAULT_GROUP, 
                                                        ?DEFAULT_MQ,
                                                        ?DEFAULT_PORT
                                                      ], []).
 
 start_link( WorkGroup, MqModule, Port ) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [ WorkGroup,
+    gen_server:start_link({local, ?MOD(WorkGroup)}, ?MODULE, [ 
+                                                       WorkGroup,
                                                        MqModule,
                                                        Port
                                                      ], []).
@@ -66,8 +90,7 @@ start_link( WorkGroup, MqModule, Port ) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Group, MqMod, Port]) ->
-    process_flag(trap_exit, true),
-    ok = pg:create( Group ),
+    ok = create_group( Group ),
     {ok, WSock} = gen_tcp:listen(Port,[{active,true}]),
     {ok, #state{port=Port, group=Group, mq=MqMod, wsock=WSock}, 0}.
 
@@ -76,7 +99,7 @@ init([Group, MqMod, Port]) ->
 %% @doc Handling call messages, currently unused.
 %%--------------------------------------------------------------------
 handle_call( Request, From, State) -> 
-    ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p~n",[Request, From, State]),
+    ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p",[Request, From, State]),
     {stop, badarg, State}.
 
 %%--------------------------------------------------------------------
@@ -84,7 +107,7 @@ handle_call( Request, From, State) ->
 %% @doc Handling cast messages, currently unused.
 %%--------------------------------------------------------------------
 handle_cast( Msg, State) ->
-    ?DEBUG("Conn server should not be getting casts (~p): ~p~n",[Msg,State]),
+    ?DEBUG("Conn server should not be getting casts (~p): ~p",[Msg,State]),
     {stop,badarg,State}.
 
 %%--------------------------------------------------------------------
@@ -95,12 +118,24 @@ handle_cast( Msg, State) ->
 %% @spec handle_info(Info, State) -> {noreply, State} 
 %% @end
 %%--------------------------------------------------------------------
+
+handle_info({tcp_closed, Sock}, State)-> 
+    ?DEBUG("TCP CLOSED",[]),
+    {noreply,State};
+handle_info({tcp_error, Sock}, State) -> 
+    ?DEBUG("TCP ERROR",[]),
+    {noreply,State};
 handle_info({tcp, Sock, RawData}, State) ->
     create_mq( Sock, RawData, State ),
     {noreply, State};
 handle_info(timeout, State=#state{wsock=WS}) ->
     {ok,_} = gen_tcp:accept(WS),
+    {noreply, State};
+
+handle_info( Msg, State ) ->
+    ?DEBUG("Conn server should not be getting misc msgs ( ~p ):~p",[Msg,State]),
     {noreply, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -144,3 +179,10 @@ shutdown_mqs( #state{group=G} ) ->
 close_sock( #state{wsock=WS} ) ->
     gen_tcp:close( WS ).
 
+% Creates a group, if it already exists, we can hijack
+create_group( Group ) ->
+    case pg:create( Group ) of
+        ok -> ok;
+        {error, already_created} -> ok;
+        Err -> Err
+    end.

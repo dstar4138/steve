@@ -17,16 +17,18 @@
         { os, [ "win", "osx", "linux", "bsd" ] },
     
     % OS version
-        { osv, "^\d+(\.\d+\.\d+)?$" },
+        { osv, version },
 
     % Architecture
         { arch, ["x86", "x86_64", "arm"] }, 
 
     % Executables required, list of tuples: {execname, version}
-        { exec, {"[a-z]+", "^\d+(\.\d+\.[\d\*]+)?$" } },
+        { exec, { {"name",lowercase}, 
+                  {"version", version}} },
 
     % Library List, list of tuples: {libary name, version}
-        { lib, {"[a-z]+", "^\d+(\.\d+\.[\d\*]+)?$" } }
+        { lib, { {"name",lowercase}, 
+                 {"version",version} } }
 
 ]}.
 

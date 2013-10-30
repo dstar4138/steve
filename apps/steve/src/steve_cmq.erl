@@ -136,10 +136,10 @@ handle_error( Err, _State = #state{sock=S} ) ->
 process( Msg , State = #state{sock=S}) ->
     case steve_state:process_cmsg( Msg ) of
         {reply, Rep} -> 
-            gen_tcp:send( S, steve_util:encode_json(Rep) ),
+            gen_tcp:send( S, capi:encode(Rep) ),
             {noreply, State};            
         {reply, Rep, Cid} ->
-            gen_tcp:send( S, steve_util:encode_json(Rep) ),
+            gen_tcp:send( S, capi:encode(Rep) ),
             {noreply, State#state{cid=Cid}};
         noreply -> {noreply, State};
         {shutdown, Reason} -> {stop, Reason, State}

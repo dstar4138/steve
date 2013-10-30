@@ -4,6 +4,7 @@
 %% @author Alexander Dean
 -module(steve_state).
 -behaviour(gen_server).
+-compile(export_all).
 
 -include("debug.hrl").
 -include("steve_obj.hrl").
@@ -21,7 +22,7 @@
          terminate/2,
          code_change/3]).
 
--record(steve_state, {}).
+-record(steve_state, { reqs, caps, db }).
 
 %%%===================================================================
 %%% API
@@ -46,7 +47,7 @@ process_fmsg( Msg ) -> gen_server:call( ?MODULE, {fmsg, Msg} ).
 %% @end
 %%--------------------------------------------------------------------
 start_link( StartArgs ) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], StartArgs).
+     gen_server:start_link({local, ?MODULE}, ?MODULE, [StartArgs], []).
 
 
 %%%===================================================================
@@ -62,7 +63,10 @@ start_link( StartArgs ) ->
 %% @end
 %%--------------------------------------------------------------------
 init( StartArgs ) ->
-    State = parse_args(StartArgs),
+    ?DEBUG("Got Args: ~p~n",[StartArgs]),
+    process_flag(trap_exit, true),
+    State = parse_args(StartArgs, #steve_state{}),
+    broadcast( update ),
     {ok, State}.
 
 %%--------------------------------------------------------------------
@@ -79,6 +83,24 @@ init( StartArgs ) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
+    Cid = case Id of nil -> steve_util:uuid(); _ -> Id end,
+    ReqDef = State#steve_state.reqs,
+    {reply, ?CAPI_REQDEF( Cid, ReqDef ), State}; 
+
+handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) ->
+    CID = steve_util:uuid(), % Generate new Computation ID.
+    broadcast( {comp_req, Id, CID, Cnt} ), % Broadcast client has new comp-request
+    if Files -> % If Client has files to send over, open a connection and inform
+            {ok, Conn} = steve_ftp:start_conn( Id, CID ),
+            {reply, ?CAPI_COMP_RET( CID, Conn ), State};
+        true ->
+            {reply, ?CAPI_COMP_RET( CID ), State}
+    end;
+handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
+    {reply, run_query( Qry, State ), State };
+
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -123,10 +145,64 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%% Internal functions
 %%%===================================================================
 
-% Parses the incoming arguments and creates Steve's internal state machine.
-parse_args( Args ) -> 
-    ?DEBUG("StartArgs = ~p",[Args]),
-    %TODO: Broadcast request for update.
-    #steve_state{}.
+%% @hidden
+%% @doc Parses the incoming arguments.
+parse_args( [], State) -> State;
+parse_args( [{rcfile, Cnt}|Rest], State ) ->
+    {[Requests,CapList],_} = proplists:split(Cnt, [requests, capability]),
+    RequestStruct = hd(Requests), %LATER: warn user that only the first is considered.
+    {ok, CapStruct} = requests:build(RequestStruct, CapList),
+    JsonStyleReqStruct = gen_req_def( RequestStruct ),
+    NewState = State#steve_state{reqs=JsonStyleReqStruct, caps=CapStruct},
+    parse_args( Rest, NewState );
+parse_args( [_|R], S ) -> parse_args(R,S). %TODO: Any other Args?
 
+%% @hidden
+%% @doc Generates a json compatible reqstruct for sending to clients.
+gen_req_def( {requests, ReqStrctList} ) -> gen_req_def( ReqStrctList, [] ).
+gen_req_def( [], A ) -> A;
+gen_req_def( [{Name,required,Value}|Rest], A ) ->
+    Dat = [ {<<"name">>, b(Name)},
+            {<<"required">>, true},
+            {<<"val">>, gen_req_def_val( Value )} ],
+    gen_req_def( Rest, [Dat|A] );
+gen_req_def( [{Name, Value}|Rest], A ) ->
+    Dat =  [ {<<"name">>, b(Name)},
+             {<<"required">>, false},
+             {<<"val">>, gen_req_def_val( Value )} ],
+    gen_req_def( Rest, [Dat|A] ).
+gen_req_def_val( Key )     when is_atom(Key) -> [{<<"key">>, b( Key )}];
+gen_req_def_val( Binary )  when is_binary( Binary ) -> Binary;
+gen_req_def_val( Tuple )   when is_tuple( Tuple ) ->
+    lists:map( fun({Name,Val}) -> { b(Name), gen_req_def_val( Val )} end,
+               erlang:tuple_to_list( Tuple ) );
+gen_req_def_val( List=[H|_] )   when is_list( List ) ->
+    case is_list(H) orelse is_tuple(H) orelse is_binary(H) of
+        true -> % Then its a list of values
+            lists:map( fun gen_req_def_val/1, List );
+        false -> % Then its a string
+            b( List )
+    end.
+
+%% @hidden
+%% @doc Convert a value to binary.
+b( N ) when is_binary( N ) -> N;
+b( N ) when is_list( N ) -> erlang:list_to_binary( N );
+b( N ) when is_atom( N ) -> erlang:atom_to_binary( N, unicode ).
+
+
+%%% Messaging Handlers
+
+%% @hidden
+%% @doc Broadcast a message to all friends/peers.
+broadcast( update ) -> ok; %TODO: Actually push message to steve_conn
+broadcast( {comp_req, ID, CID, Cnt} ) -> ok.
+
+%% @hidden
+%% @doc Handle a query and respond.
+run_query( peers, _ )   -> ?CAPI_QRY_RET( steve_conn:get_friend_count() );
+run_query( clients, _ ) -> ?CAPI_QRY_RET( steve_conn:get_client_count() );
+run_query( {cid, CID}, #steve_state{db=DB} ) -> 
+    ?CAPI_QRY_RET( steve_db:check_cid(DB, CID) );
+run_query( _, _ ) -> ?CAPI_QRY_ERR( <<"Unknown Query">> ).
 

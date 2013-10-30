@@ -30,6 +30,8 @@
 %% @end
 %%--------------------------------------------------------------------
 start(_StartType, StartArgs) ->
+    ?DEBUG("Starting Inets service for TFTP...",[]),
+    inets:start(tftp, steve_ftp:get_config()),
     ?DEBUG("Starting Steve Daemon...",[]),
     steve_sup:start_link( StartArgs ).
 
