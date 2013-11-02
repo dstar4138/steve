@@ -4,6 +4,8 @@
 %%  two instances of steve_conn are started.
 %%
 %%  This uses the async method demo'ed by Serge Aleynikov at erlangcentral.org.
+%%  See steve_cmq_sup and steve_cmq for the other portions of the async socket
+%%  implementation.
 %%
 %% @author Alexander Dean
 %%
@@ -35,7 +37,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, { port, group, mq, wsock, ref }).
+-record(state, { port, group, mq, wsock, ref, cids }).
           
 
 %%%===================================================================
@@ -131,7 +133,7 @@ handle_cast( Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
-            #state{ wsock=WSock, ref=Ref } = State) ->
+            #state{ wsock=WSock, ref=Ref, cids=CIDS } = State) ->
     try 
         case set_sockopt( WSock, CliSocket ) of
             ok -> ok;
@@ -140,7 +142,7 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
 
         %% New client connected - spawn a new process using the message queue
         %% implementation passed in on init.
-        ok = create_mq( CliSocket, State ),
+        {ok, ClientID} = create_mq( CliSocket, State ),
 
         %% Signal the network driver that we are ready to accept another 
         %% connection.
@@ -148,7 +150,7 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
             {ok,    NewRef} -> ok;
             {error, NewRef} -> exit({async_accept, inet:format_error(NewRef)})
         end,
-        {noreply, State#state{ref=NewRef}}
+        {noreply, State#state{ref=NewRef, cids=[ClientID|CIDS]}}
     catch exit:Why ->
             ?ERROR("steve_conn:handle_info","Error in async accept conn: ~p.",[Why]),
             {stop, Why, State}
@@ -194,10 +196,9 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 % Creates and links to a Friend Message Queue in a particular work group.
 create_mq( Sock, #state{group=G,mq=Mq} ) ->
-    Pid = spawn_link( Mq, start_link, [Sock] ),
-    gen_tcp:controlling_process( Sock, Pid ),
-    pg:join(G, Pid),
-    ok.
+    ClientID = steve_util:uuid(), % Generate new Client ID.
+    {ok, _Pid} = Mq:start_mq( G, ClientID, Sock ), 
+    {ok, ClientID}.
 
 % Send a shutdown message to all message queues.
 shutdown_mqs( #state{group=G} ) ->
@@ -217,7 +218,7 @@ create_group( Group ) ->
 
 %% Taken from prim_init. We are merely copying some socket options from the 
 %% listening socket to the new client socket.
-set_sockopt( ListSock, CliSocket) ->
+set_sockopt( ListSock, CliSocket ) ->
     true = inet_db:register_socket( CliSocket, inet_tcp ),
     case prim_inet:getopts( ListSock, 
                 [active, nodelay, keepalive, delay_send, priority, tos] ) 
@@ -229,4 +230,3 @@ set_sockopt( ListSock, CliSocket) ->
             end;
         Error -> gen_tcp:close(CliSocket), Error
     end.
-

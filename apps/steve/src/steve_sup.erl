@@ -57,10 +57,12 @@ init( StartArgs ) ->
     {ok, PPort, CPort} = get_conn_ports(),
     {ok, RCFile} = get_rcfile(),
     {ok, {{one_for_one, 5, 10}, [
-                ?NCHILD(fconn, steve_conn, worker, [friends, steve_fmq, PPort]) % Peer Server
-               ,?NCHILD(cconn, steve_conn, worker, [clients, steve_cmq, CPort]) % Client Server
+                ?CHILD(steve_fmq_sup, supervisor, []) % F-CONN MQ Supervisor
+               ,?CHILD(steve_cmq_sup, supervisor, []) % C-CONN MQ Supervisor
                ,?CHILD(steve_comp_sup, supervisor, []) % Computation Server
                ,?CHILD(steve_state, worker, [{rcfile,RCFile}|StartArgs]) % State Server
+               ,?NCHILD(fconn, steve_conn, worker, [friends, steve_fmq_sup, PPort]) % Peer Server
+               ,?NCHILD(cconn, steve_conn, worker, [clients, steve_cmq_sup, CPort]) % Client Server
          ]}}.
 
 %%%===================================================================
