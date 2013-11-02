@@ -13,6 +13,9 @@
 %% API
 -export([start_link/1]).
 -export([process_cmsg/1]).
+-export([peer_write_perm_check/2, 
+         peer_read_perm_check/2,
+         peer_file_event/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -27,6 +30,29 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc Check if a Client/Friend is connected via MQ and if they have valid
+%%      WRITE permission of a particular Computational ID. Used in the 
+%%      steve_ftp callback module for file transfers.
+%% @end
+-spec peer_write_perm_check( tuple(), uid() ) -> boolean().
+peer_write_perm_check( Peer, CompID ) -> true. %TODO: verify peer has access
+
+
+%% @doc Check if a Client/Friend is connected via MQ and if they have valid
+%%      READ permission of a particular Computational ID. Used in the 
+%%      steve_ftp callback module for file transfers.
+%% @end
+-spec peer_read_perm_check( tuple(), uid() ) -> boolean().
+peer_read_perm_check( Peer, CompID ) -> true. %TODO: verify peer has access
+
+%% @doc If an event happens on a particular file, namely if its finished
+%%  writing or reading, steve will most likely need to be informed.
+%% @end
+-spec peer_file_event( uid(), tuple() ) -> ok.
+peer_file_event( CompID, Event ) ->
+    ?DEBUG("Peer ~p file in repo: ~p",[Event, CompID]),
+    ok.
 
 %% @doc Ask the state server to process a client's message. This is called
 %% from steve_cmq:process/2.

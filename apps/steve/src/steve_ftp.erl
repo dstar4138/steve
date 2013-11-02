@@ -25,6 +25,9 @@
           get_conn_port/0  % Grabs the client welcome port.
         ]). 
 
+%% Overlap's tftp_file's state with a filename check.
+-record( overlap_state, { internal, filename } ).
+
 %% ===========================================================================
 %% Steve API Calls
 %% ===========================================================================
@@ -54,8 +57,14 @@ get_conn_port() ->
 %% @doc Prepares open of a file on the client side.
 prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
     case validate_options( Peer, Access, Filename ) of
-        true  -> tftp_file:prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial );
-        false -> {error, {eacces, "Invalid Filename for that type of access."}}
+        false -> {error, {eacces, "Invalid Filename for that type of access."}};
+        true  -> (case 
+            tftp_file:prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
+        of
+            {ok, AcceptedOptions, State} -> 
+                          {ok, AcceptedOptions, wrap({Filename},State)};
+            Msg -> Msg
+        end)
     end.
 
 %% ------------------------------------------------------------------------- %%
@@ -63,16 +72,42 @@ prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
 
 %% @doc Opens a file for read/write access.
 open( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
-    tftp_file:open( Peer, Access, Filename, Mode, SuggestedOptions, Initial ).
+    case
+        tftp_file:open( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
+    of
+        {ok, Opts, State} -> {ok, Opts, wrap( {Filename}, State )};
+        Msg -> Msg
+    end.
 
-%% @doc Reads a chunk of a file from the wire.
-read( State ) -> tftp_file:read( State ).
+%% @doc Reads a chunk of a file from the wire. Triggers state server 
+%% notification when read is finished.
+%% @end
+read( State ) -> 
+    {X, I} = unwrap( State ),
+    case tftp_file:read( I ) of
+        {more, Bin, NewState} -> 
+            {more, Bin, wrap( X, NewState )};
+        {last, Bin, FileSize} ->
+            trigger(finish_read, X, FileSize),
+            {last, Bin, FileSize};
+        Msg -> Msg
+    end.
     
 %% @doc Writes a chunk from the wire to a file.
-write( Bin, State ) -> tftp_file:write( Bin, State ).
+write( Bin, State ) -> 
+    {X, I} = unwrap( State ),
+    case tftp_file:write( Bin, I ) of
+        {more, NewState} -> {more, wrap( X, NewState )};
+        {last, FileSize} -> 
+            trigger( finish_write, X, FileSize ),
+            {last, FileSize};
+        Msg -> Msg
+    end.
 
 %% @doc Aborts the file transfer.
-abort( Code, Text, State) -> tftp_file:abort( Code, Text, State ).
+abort( Code, Text, State ) -> 
+    {_, I} = unwrap( State ),
+    tftp_file:abort( Code, Text, I ).
     
 
 %% ===========================================================================
@@ -85,16 +120,60 @@ abort( Code, Text, State) -> tftp_file:abort( Code, Text, State ).
 %%  read for a result value and thus appended with 'res.'. Note the filename
 %%  can be written with or without '-'. However, reading will always have them.
 %% @end
-validate_options( Peer, write, << Name:(32*8), ".zip">> ) ->
-    CompID = steve_util:bits_to_uuid( Name ),
-    steve_state:peer_write_perm_check( Peer, CompID );
-validate_options( Peer, write, << Name:(36*8), ".zip">> ) ->
-    CompID = steve_util:bits_to_uuid( Name ),
-    steve_state:peer_write_perm_check( Peer, CompID );
-
-validate_options( Peer, read, <<"res.", Name:(36*8), ".zip">> ) ->
-    CompID = steve_util:bits_to_uuid( Name ),
-    steve_state:peer_read_perm_check( Peer, CompID );
-
+validate_options( Peer, write, FileName ) ->
+    case get_compid( FileName ) of
+        {ok, CompID} -> steve_state:peer_write_perm_check( Peer, CompID );
+        _ -> false
+    end;
+validate_options( Peer, read, "res." ++ FileName ) ->
+    case get_compid( FileName ) of
+        {ok, CompID} -> steve_state:peer_read_perm_check( Peer, CompID );
+        _ -> false
+    end;
 validate_options( _, _, _ ) -> true. %TODO: Set to false after testing!!
+
+
+%% @hidden 
+%% @doc Extract the UUID from the Filename by doing easier binary matching.
+get_compid( L ) when is_list( L ) -> get_compid( erlang:list_to_binary( L ) );
+get_compid( << Name:(36*8), ".zip" >> ) -> % If file has dashes like normal uuid
+    {ok, steve_util:bits_to_uuid( Name ) };
+get_compid( << Name:(32*8), ".zip" >> ) -> % If the file is missing dashes.
+    {ok, steve_util:bits_to_uuid( Name ) };
+get_compid( _ ) -> {error, badarg}.
+
+
+%% @hidden
+%% @doc Unwrap our overlapping state to grab the internal module's state.
+unwrap( #overlap_state{ internal = I } = S ) -> {pullout(S), I};
+unwrap( UnknownState ) -> { nil, UnknownState }.
+
+
+%% @hidden
+%% @doc Just grab out our additional wrapper data and save to a tuple for 
+%%  reinsertion.
+%% @end
+pullout( #overlap_state{ filename = F} ) -> {F}.
+
+
+%% @hidden
+%% @doc Opposite of unwrap/1, will reinsert our pulled-out data into our
+%%   wrapper state.
+%% @end
+wrap( nil, UnknownState ) -> UnknownState;
+wrap( {F}, State ) -> #overlap_state{ internal = State, filename = F }.
+
+
+%% @hidden
+%% @doc Triggers an event on the state server based on the file that was just
+%%   read/written to. If the file is now needed by another steve node for 
+%%   processing, Steve needs to know it has the file.
+%% @end
+trigger( Action, {FileName}, FileSize ) ->
+    case get_compid( FileName ) of
+        {ok, CompID} ->
+            steve_util:peer_file_event( CompID, {Action, FileName, FileSize} );
+        _ -> 
+            ?ERROR( "steve_ftp:trigger", "Unable to get UUID: ~p",[FileName])
+    end.
 
