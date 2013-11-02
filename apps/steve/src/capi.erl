@@ -12,7 +12,7 @@
 -include("debug.hrl").
 
 -export([parse/1]).
-
+-export([encode/1]).
 
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
 %% message record.
@@ -28,9 +28,24 @@ parse( RawData ) ->
 %% @doc Encodes a CAPI message (from server) into a binary string that can be
 %% sent back to Client.
 %% @end
--spec encode( cmsg() ) -> binary().
-encode( Msg ) -> ok. %XXX: make cmsg into binary using steve_util:encode_json/1.
-
+-spec encode( cmsg_ret() ) -> binary().
+encode( #capi_reqdef{ id=ID, cnt=Cnt } ) -> 
+    steve_util:encode_json( [{<<"msg">>,<<"reqdef">>},
+                             {<<"id">>,ID},
+                             {<<"cnt">>,Cnt}] );
+encode( #capi_comp_ret{ cid=CID, sock=Conn } ) ->
+    Port = 
+        if Conn == nil -> [];
+           true -> [{<<"port">>,Conn}]
+        end,
+    steve_util:encode_json( [{<<"msg">>,<<"comp">>},
+                             {<<"cid">>,CID} | Port ] );
+encode( #capi_query_ret{ success=Success, result = Res } ) ->
+    Msg = case Success of
+                true -> <<"qr">>;
+                false -> <<"qe">>
+          end,
+    steve_util:encode_json( [{<<"msg">>, Msg},{<<"cnt">>,Res}] ).
 
 %% ===========================================================================
 %% Internal Functions

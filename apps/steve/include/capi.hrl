@@ -29,3 +29,5 @@
 -record(capi_query_ret, { success :: boolean(), result :: term() }).
 -define(CAPI_QRY_RET( Res ), #capi_query_ret{ success=true, result=Res }).
 -define(CAPI_QRY_ERR( Res ), #capi_query_ret{ success=false, result=Res }).
+
+-type cmsg_ret() :: #capi_reqdef{} | #capi_comp_ret{} | #capi_query_ret{}.
