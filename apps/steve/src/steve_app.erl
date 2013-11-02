@@ -31,7 +31,7 @@
 %%--------------------------------------------------------------------
 start(_StartType, StartArgs) ->
     ?DEBUG("Starting Inets service for TFTP...",[]),
-    inets:start(tftp, steve_ftp:get_config()),
+    {ok, Pid} = startup_inets(),
     ?DEBUG("Starting Steve Daemon...",[]),
     steve_sup:start_link( StartArgs ).
 
@@ -60,3 +60,17 @@ prep_stop( _State ) ->
 stop(_State) ->
     ok.
 
+
+%%%===================================================================
+%%% Internal Functions
+%%%===================================================================
+
+%% @hidden
+%% @doc Starts up the inets service and the tftp server for file transactions.
+startup_inets() ->
+    case inets:start() of
+        ok  -> inets:start(tftp, steve_ftp:get_config());
+        Err -> Err
+    end.
+
+    

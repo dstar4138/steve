@@ -15,11 +15,10 @@
 % This is a TFTP Callback module for handling File Transfers from clients.
 -behaviour(tftp).
 -export([prepare/6, open/6, read/1, write/2, abort/3]).
-
+-define(ROOTDIR, {root_dir,  steve_util:getrootdir()++"/compserve"}).
 -define(DEFAULT_CONFIG, [ {port,0},
-                          {root_dir, ?DEFAULT_STEVEDIR++"/compserve"},
                           {debug,all},
-                          {callback, {".*", ?MODULE, []}} ]).
+                          {callback, {".*", ?MODULE, [?ROOTDIR]}} ]).
 
 % Internal Steve API.
 -export([ get_config/0, % Get TFTPd Startup Config, called in steve_app:start/2
@@ -39,8 +38,14 @@ get_config() ->
     end.
 
 %% @doc Get the port Clients will need to connect to for file transfers.
--spec get_conn_port() -> integer().
-get_conn_port() -> 69. %TODO: Port is 0, so it will auto-scan. Grab from inets.
+-spec get_conn_port() -> integer() | {error, Reason :: any()}.
+get_conn_port() -> 
+    case lists:keysearch(tftpd, 1, inets:services_info()) of
+        {value, {tftpd, _Pid, Opts}} -> 
+            element(2, lists:keyfind( port, 1, Opts ));
+        false -> {error, "TFTP service not started."}
+    end.
+
 
 %% ===========================================================================
 %% TFTP Callback Functions

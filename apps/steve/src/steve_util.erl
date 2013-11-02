@@ -1,6 +1,7 @@
 %% Utility Functions used throughout Steve.
 %% @author Alexander Dean
 -module(steve_util).
+-include("steve.hrl").
 -include("debug.hrl").
 -include("util_types.hrl").
 
@@ -11,7 +12,7 @@
 -export([hash/1]).
 -export([loadrc/1, readfile/1, clean_path/1]).
 -export([encode_json/1, decode_json/1]).
-
+-export([getrootdir/0]).
 
 %% @doc Follows RFC4122 for generating UUIDs version 4 via Random Numbers. 
 %% This function will perform fairly slowly as it uses the crypto module,
@@ -70,6 +71,12 @@ readfile( FilePath ) ->
 -spec clean_path( string() ) -> string().
 clean_path( Path ) -> filename:nativename( tilde_expand( Path ) ).
 
+%% @doc Get the root directory Steve uses for saving/config
+getrootdir() ->
+    case application:get_env(steve, rootdir) of
+        undefined -> ?DEFAULT_STEVEDIR;
+        {ok, P} -> P
+    end.
 
 %% ===========================================================================
 %% Private Functions
