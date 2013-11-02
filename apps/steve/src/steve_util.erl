@@ -8,7 +8,7 @@
 % We want a proplist back rather than a stuct or eep18.
 -define(JSONX_OPTIONS, [{format,proplist}]).
 
--export([uuid/0, valid_uuid/1]).
+-export([uuid/0, valid_uuid/1, uuid_to_str/1, str_to_uuid/1, bits_to_uuid/1]).
 -export([hash/1]).
 -export([loadrc/1, readfile/1, clean_path/1]).
 -export([encode_json/1, decode_json/1]).
@@ -24,6 +24,26 @@ uuid()->
     <<A:48,B:12,C:62,_:6>>=crypto:rand_bytes(16),
     <<A:48,4:4,B:12,2:2,C:62>>.
 
+%% @doc Used for converting for File creation based on Computation ID.
+-spec uuid_to_str( uid() ) -> string().
+uuid_to_str( <<A:32, B:16, C:16, D:8, E:8, F:48>> ) ->
+    lists:flatten(
+      io_lib:format(
+            "~8.16.0b-~4.16.0b-~4.16.0b-~2.16.0b~2.16.0b-~12.16.0b", 
+            [A,B,C,D,E,F])).
+
+%% @doc Converts the bits pulled from a string into a UUID.
+-spec bits_to_uuid( integer() ) -> uid().
+bits_to_uuid( I ) when is_integer( I ) ->
+    str_to_uuid( erlang:binary_to_list(
+          try <<I:(36*8)>> catch _ -> <<I:(32*8)>> end )).
+
+%% @doc Converts a string to a UUID. Used for checking File names based on
+%%  Computation IDs.
+%% @end
+-spec str_to_uuid( string() ) -> uid().
+str_to_uuid( S ) when is_list(S) ->
+    tobin( lists:filter(fun(C)-> C/=$- end, S), [] ).
 
 %% @doc Checks to make sure the uuid is of the right size and is version 4.
 -spec valid_uuid( uid() ) -> boolean().
@@ -72,11 +92,13 @@ readfile( FilePath ) ->
 clean_path( Path ) -> filename:nativename( tilde_expand( Path ) ).
 
 %% @doc Get the root directory Steve uses for saving/config
+-spec getrootdir() -> string().
 getrootdir() ->
-    case application:get_env(steve, rootdir) of
+    F = case application:get_env(steve, rootdir) of
         undefined -> ?DEFAULT_STEVEDIR;
         {ok, P} -> P
-    end.
+    end,
+    clean_path( F ).
 
 %% ===========================================================================
 %% Private Functions
@@ -89,4 +111,10 @@ tilde_expand( [ $~ | RestOfPath ] ) ->
     {ok, [[Home]]} = init:get_argument(home), %TODO: check on non-linux os
     string:concat( Home, RestOfPath );
 tilde_expand( Path ) -> Path.
+
+
+%% @hidden
+%% @doc Converts a string into binary by eatting two chars per loop.
+tobin( [], A )-> erlang:list_to_binary(lists:reverse(A));
+tobin( [X,Y|R], A )-> {ok,[B],_}=io_lib:fread("~16u", [X,Y]), tobin(R,[B|A]).
 

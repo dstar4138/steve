@@ -80,6 +80,21 @@ abort( Code, Text, State) -> tftp_file:abort( Code, Text, State ).
 %% ===========================================================================
 
 %% @hidden
-%% @doc Validate whether Peer has Access on Filename.
-validate_options( Peer, Access, Filename ) ->
-   true. %TODO: Check steve_state for whether Peer has Access on Filename. 
+%% @doc Validate whether Peer has Access on Filename. Filenames must be the
+%%  Command ID followed by the 'zip' extension. If its a read, it must be a
+%%  read for a result value and thus appended with 'res.'. Note the filename
+%%  can be written with or without '-'. However, reading will always have them.
+%% @end
+validate_options( Peer, write, << Name:(32*8), ".zip">> ) ->
+    CompID = steve_util:bits_to_uuid( Name ),
+    steve_state:peer_write_perm_check( Peer, CompID );
+validate_options( Peer, write, << Name:(36*8), ".zip">> ) ->
+    CompID = steve_util:bits_to_uuid( Name ),
+    steve_state:peer_write_perm_check( Peer, CompID );
+
+validate_options( Peer, read, <<"res.", Name:(36*8), ".zip">> ) ->
+    CompID = steve_util:bits_to_uuid( Name ),
+    steve_state:peer_read_perm_check( Peer, CompID );
+
+validate_options( _, _, _ ) -> true. %TODO: Set to false after testing!!
+
