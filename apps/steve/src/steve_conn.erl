@@ -37,7 +37,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, { port, group, mq, wsock, ref, cids }).
+-record(state, { port, group, mq, wsock, ref, mqs }).
           
 
 %%%===================================================================
@@ -54,7 +54,7 @@ get_client_count() -> length( check_mq_group( clients ) ).
 
 
 %% @doc Get a list of process id's of all message queues in a particular 
-%% process group. There are only two groups, firends | clients. See 
+%% process group. There are only two groups, friends | clients. See 
 %% steve_sup for more information.
 %% @end
 check_mq_group( Group ) ->
@@ -133,7 +133,7 @@ handle_cast( Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
-            #state{ wsock=WSock, ref=Ref, cids=CIDS } = State) ->
+            #state{ wsock=WSock, ref=Ref, mqs=MQs } = State) ->
     try 
         case set_sockopt( WSock, CliSocket ) of
             ok -> ok;
@@ -142,7 +142,7 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
 
         %% New client connected - spawn a new process using the message queue
         %% implementation passed in on init.
-        {ok, ClientID} = create_mq( CliSocket, State ),
+        {ok, MQRef} = create_mq( CliSocket, State ),
 
         %% Signal the network driver that we are ready to accept another 
         %% connection.
@@ -150,7 +150,7 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
             {ok,    NewRef} -> ok;
             {error, NewRef} -> exit({async_accept, inet:format_error(NewRef)})
         end,
-        {noreply, State#state{ref=NewRef, cids=[ClientID|CIDS]}}
+        {noreply, State#state{ref=NewRef, mqs=[MQRef|MQs]}}
     catch exit:Why ->
             ?ERROR("steve_conn:handle_info","Error in async accept conn: ~p.",[Why]),
             {stop, Why, State}
@@ -158,9 +158,10 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
 handle_info( {inet_async, _ListSock, _Ref, Error}, State ) ->
     ?ERROR("steve_conn:handle_info", "Error in socket acceptor: ~p.", [Error]),
     {stop, Error, State};
-handle_info( {'EXIT', _Pid, Status}, State ) ->
+handle_info( {'EXIT', Pid, Status}, #state{mqs=MQs} = State ) ->
     ?ERROR("steve_conn:handle_info", "Message Queue crashed with message: ~p",[Status]),
-    {noreply, State};
+    NewMQs = lists:keydelete( Pid, 1, MQs ),
+    {noreply, State=#state{ mqs=NewMQs }};
 
 handle_info( Msg, State ) ->
     ?DEBUG("Conn server should not be getting misc msgs ( ~p ):~p",[Msg,State]),
@@ -196,9 +197,10 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 % Creates and links to a Friend Message Queue in a particular work group.
 create_mq( Sock, #state{group=G,mq=Mq} ) ->
-    ClientID = steve_util:uuid(), % Generate new Client ID.
-    {ok, _Pid} = Mq:start_mq( G, ClientID, Sock ), 
-    {ok, ClientID}.
+    MQID = steve_util:uuid(), % Generate new ID to reference the MQ with
+    {ok, Pid} = Mq:start_mq( G, MQID, Sock ), 
+    link( Pid ),
+    {ok, {Pid, MQID}}.
 
 % Send a shutdown message to all message queues.
 shutdown_mqs( #state{group=G} ) ->

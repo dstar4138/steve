@@ -2,6 +2,10 @@
 %%   Follows the CAPI for communicating using JSON over TCP with a client. The
 %%   message queue is being used to hold messages until a client reconnects.
 %%
+%%  Ultimately this should be merged with Client Message Queue due to how
+%%  similar their process is. We will push this Async socket server into 
+%%  another application.
+%%
 %% @author Alexander Dean
 -module(steve_cmq).
 -behaviour(gen_fsm).
@@ -239,10 +243,6 @@ process( Msg , NextState, State = #state{sock=S}) ->
             ?DEBUG("State server says to reply with: ~p",[Rep]),
             gen_tcp:send( S, capi:encode(Rep) ),
             {next_state, NextState, State};            
-        {reply, Rep, Cid} ->
-            ?DEBUG("State server says to reply with: ~p,~p",[Cid, Rep]),
-            gen_tcp:send( S, capi:encode(Rep) ),
-            {next_state, NextState, State#state{cliID=Cid}};
         noreply ->
             ?DEBUG("State server says not to reply.", []),
             {next_state, NextState, State};

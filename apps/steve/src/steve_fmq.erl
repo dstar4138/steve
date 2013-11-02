@@ -2,39 +2,81 @@
 %%  A Queue used by steve_conn to handle message forwarding and broadcasting to
 %%  other friends. It also knows how to manipulate and handle messages meeting
 %%  the api.
-
+%%
+%%  Ultimately this should be merged with Client Message Queue due to how
+%%  similar their process is. We will push this Async socket server into 
+%%  another application.
+%% 
+%% @author Alexander Dean
 -module(steve_fmq).
--behaviour(gen_server).
+-behaviour(gen_fsm).
 -include("debug.hrl").
 
-
 %% API
--export([start_link/1]).
+-export([start_link/0]).
+-export([set_socket/3, send_to_friend/2]).
 
-
-%% gen_server callbacks
+%% gen_fsm callbacks
 -export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
+         handle_event/3,
+         handle_sync_event/4,
+         handle_info/3,
+         terminate/3,
+         code_change/4]).
 
--record(state, {sock, friend = nil}).
+%% FSM's States:
+-export([ 'WAIT_FOR_SOCKET'/2,
+          'WAIT_FOR_DATA'/2 ]).
+
+%% Internal FSM State.
+-record(state, {
+          sock,   % Listening socket.
+          addr,   % Friend's address.
+          friend  % Friend object for referencing.
+    }).
+
+%% Socket timeout.
+-define( TIMEOUT, 120000 ).        % LATER: Abstract out of this module.
+%% Default Group.
+-define( FRIEND_GROUP, friends ).  % LATER: Abstract out of this module.
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
+%% @doc Creates a gen_fsm process which calls Module:init/1 to
+%% initialize. To ensure a synchronized start-up procedure, this 
+%% function does not return until Module:init/1 has returned.
 %%
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link( Socket ) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Socket], []).
+start_link() ->
+    gen_fsm:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+%%--------------------------------------------------------------------
+%% @doc Set an instance of this Message Queue's socket. This should
+%% only be called once, after the MQ is started up. The steve_fmq_sup
+%% module will do this after starting it.
+%%
+%% @spec set_socket( Pid, FriendObj, Socket ) -> ok.
+%% @end
+%%--------------------------------------------------------------------
+set_socket( Pid, FriendObj, Socket ) when is_pid( Pid ), is_port( Socket ) ->
+    gen_fsm:send_event( Pid, {socket_ready, FriendObj, Socket}).
+
+%%--------------------------------------------------------------------
+%% @doc Each instance of the message queue is part of a group, this 
+%% will broadcast the a send request to the group. Only the particular
+%% Friend (specified by the friend record) will respond to the 
+%% request.
+%%
+%% @spec send_to_friend( FriendObj, RawData ) -> ok.
+%% @end
+%%--------------------------------------------------------------------
+send_to_friend( FriendObj, RawData ) ->
+    pg:send( ?FRIEND_GROUP, {send, FriendObj, RawData} ).
 
 
 %%%===================================================================
@@ -43,89 +85,171 @@ start_link( Socket ) ->
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Initializes the server
+%% @doc Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
+%% gen_fsm:start_link/[3,4], this function is called by the new 
+%% process to initialize.
 %%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
+%% @spec init(Args) -> {ok, StateName, State}
 %% @end
 %%--------------------------------------------------------------------
-init([Socket]) ->
-    {ok, SockData} = inet:peername( Socket ),
-    FriendData = case steve_state:get_friend( SockData ) of
-        {ok, FD} -> FD;
-        unknown -> 
-            ?DEBUG("Unknown friend connecting from: ~p",[SockData]),
-            unknown
-    end,
-    {ok, #state{sock=Socket, friend = FriendData}}.
+init([]) ->
+    process_flag( trap_exit, true ), 
+    {ok, 'WAIT_FOR_SOCKET', #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling call messages
+%% @doc There should be one instance of this function for each 
+%% possible state name. Whenever a gen_fsm receives an event sent 
+%% using gen_fsm:send_event/2, the instance of this function with the 
+%% same name as the current state name StateName is called to handle
+%% the event. It is also called if a timeout occurs.
 %%
-%% @spec handle_call(Request, From, State) ->
-%%                                   {reply, Reply, State} |
-%%                                   {reply, Reply, State, Timeout} |
-%%                                   {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, Reply, State} |
-%%                                   {stop, Reason, State}
+%% @spec state_name(Event, State) ->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) -> {reply, ok, State}.
+
+%% Waiting for a socket from steve_conn. Should happen fairly quickly.
+'WAIT_FOR_SOCKET'( {socket_ready, Fobj, Sock}, State ) when is_port( Sock ) ->
+    inet:setopts( Sock, [{active, once}, {packet, 2}, binary]),
+    {ok, {IP, _Port}} = inet:peername(Sock),
+    {next_state, 'WAIT_FOR_DATA', State#state{ sock=Sock, addr=IP, friend=Fobj}};
+'WAIT_FOR_SOCKET'( Msg, State ) ->
+    ?ERROR("steve_fmq:wait_for_sock","Bad event: ~p",[Msg]),
+    {next_state, 'WAIT_FOR_SOCKET', State}.
+
+%% Normal state for message queue. Only responds to internal send requests.
+%% Any data coming from the socket is handled by handle_info/3.
+'WAIT_FOR_DATA'( {send, FriendObj, Bin}, #state{sock = Sock, friend=F} = State ) ->
+     case FriendObj of  % TODO: Alter the test to use a FID
+        F -> gen_tcp:send( Sock, Bin );
+        _ -> ignore
+    end,        
+    {next_state, 'WAIT_FOR_DATA', State, ?TIMEOUT};
+'WAIT_FOR_DATA'( timeout, State) ->
+    ?ERROR("Friend connection timeout - closing.",[]),
+    {stop, normal, State};
+'WAIT_FOR_DATA'( Msg, State ) ->
+    ?ERROR("steve_fmq:wait_for_data", "Bad event: ~p", [Msg]),
+    {next_state, 'WAIT_FOR_DATA', State, ?TIMEOUT}.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling cast messages
+%% @doc Whenever a gen_fsm receives an event sent using
+%% gen_fsm:send_all_state_event/2, this function is called to handle
+%% the event.
 %%
-%% @spec handle_cast(Msg, State) -> {noreply, State} |
-%%                                  {noreply, State, Timeout} |
-%%                                  {stop, Reason, State}
+%% @spec handle_event(Event, StateName, State) ->
+%%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) -> {noreply, State}.
+handle_event( Event, StateName, State) ->
+    {stop, {StateName, undefined_event, Event}, State}.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling all non call/cast messages
+%% @doc Whenever a gen_fsm receives an event sent using
+%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
+%% to handle the event.
 %%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
+%% @spec handle_sync_event(Event, From, StateName, State) ->
+%%                   {stop, Reason, NewState} 
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
-    {noreply, State}.
+handle_sync_event( Event, _From, StateName, State) ->
+    {stop, {StateName, undefined_event, Event}, State}.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
+%% @doc This function is called by a gen_fsm when it receives any
+%% message other than a synchronous or asynchronous event (or a 
+%% system message).
+%%
+%% @spec handle_info(Info,StateName,State)->
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
+%% @end
+%%--------------------------------------------------------------------
+handle_info( {tcp, S, RawData}, StateName, #state{sock=S} = State ) ->
+    ?DEBUG("Got TCP data in MQ: ~p~nSending to PAPI for parsing.",[RawData]),
+    inet:setopts( S, [{active, once}] ),
+    case papi:parse( RawData ) of
+        {ok, Msg} -> 
+            ?DEBUG("MQ got valid msg back, PAPI parsed to: ~p",[Msg]),
+            process( Msg , StateName,  State );
+        {error, Err} ->
+            ?DEBUG("MQ got invalid msg error from PAPI: ~p",[Err]),
+            handle_error( Err, State ),
+            {next_state, StateName, State, ?TIMEOUT}
+    end;
+handle_info( {tcp_closed, S}, _StateName, #state{sock=S, addr=A} = State ) ->
+    ?DEBUG("Friend ~p has disconnected.", [A]),
+    {stop, normal, State};
+handle_info( {pg_message, _From, ?FRIEND_GROUP, GroupMsg}, StateName, 
+             State = #state{sock=S, friend=F} ) ->
+    case GroupMsg of
+        {shutdown, F} -> %TODO: Need a better compare if F is a record.
+            ?DEBUG("MQ got shutdown message.",[]),
+            gen_tcp:close(S),
+            {stop, normal, State};
+        shutdown ->
+            ?DEBUG("MQ got broadcasted shutdown message.", []),
+            gen_tcp:close(S),
+            {stop, normal, State};
+        {send, Cid, Data} ->
+            ?DEBUG("Sending data to client (~p): ~p", [Cid, Data]),
+            ok = gen_tcp:send( S, Data ),
+            {next_state, StateName, State, ?TIMEOUT};
+        _ -> % Unknown message
+            ?DEBUG("Unknown Group message, ignoring: ~p",[GroupMsg]),
+            {next_state, StateName, State, ?TIMEOUT}
+    end;    
+handle_info( Msg, StateName, State ) -> 
+    ?DEBUG("Unknown Message to MQ: ~p",[Msg]),
+    {next_state, StateName, State, ?TIMEOUT}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc This function is called by a gen_fsm when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%%
-%% @spec terminate(Reason, State) -> void()
+%% necessary cleaning up. 
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) -> ok.
+terminate(_Reason, _StateName, _State) -> ok.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% @end
+%% @doc Convert process state when code is changed
 %%--------------------------------------------------------------------
-code_change(_OldVsn, State, _Extra) -> {ok, State}.
+code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%% @hidden
+%% @doc Send an error as a message back over the wire.
+handle_error( Err, _State = #state{sock=S} ) -> 
+    gen_tcp:send( S, steve_util:encode_json([{<<"error">>,Err}]) ).
+
+%% @hidden
+%% @doc Send message to state server for processing, wait for reply and either
+%% forward over wire or ignore.
+%% @end
+process( Msg , NextState, State = #state{sock=S}) ->
+    ?DEBUG("Processing PAPI Message in State server: ~p", [Msg]),
+    case steve_state:process_fmsg( Msg ) of
+        {reply, Rep} -> 
+            ?DEBUG("State server says to reply with: ~p",[Rep]),
+            gen_tcp:send( S, papi:encode(Rep) ),
+            {next_state, NextState, State};            
+        noreply ->
+            ?DEBUG("State server says not to reply.", []),
+            {next_state, NextState, State};
+        {shutdown, Reason} -> 
+            ?DEBUG("State server says for MQ to shutdown with reason: ~p",[Reason]),
+            {stop, Reason, State}
+    end.
+

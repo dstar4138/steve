@@ -1,7 +1,10 @@
 %% Steve Friend Message Queue Supervisor
 %%
 %%  The Connection server will spawn new message queues underneith this 
-%%  supervisor.
+%%  supervisor. It handles the connection logic and process group addition.
+%%
+%%  Ultimately I would like to merge this with steve_cmq_sup then abstract
+%%  the entire async communication service to an external application.
 %%
 %% @author Alexander Dean
 -module(steve_fmq_sup).
@@ -14,7 +17,7 @@
 
 %% API
 -export([start_link/0]).
--export([start_mq/1, stop_mq/1]).
+-export([start_mq/3, stop_mq/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -30,19 +33,22 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+start_link() -> supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 %%--------------------------------------------------------------------
 %% @doc
 %%  Starts a Message queue Worker Process.
 %%
-%% @spec start_computation( ActionList ) -> {ok, Pid} 
+%% @spec start_mq( Group, FriendObj, Socket ) -> {ok, Pid} 
 %% @end
 %%--------------------------------------------------------------------
-start_mq( Args ) ->
-    ?DEBUG("Starting Mq (~p)~n",[Args]),
-    supervisor:start_child(?MODULE, Args).
+start_mq( Group, FriendObj, Socket ) ->
+    ?DEBUG("Starting Mq (~p)~n",[[Group,FriendObj,Socket]]),
+    {ok, Pid} = supervisor:start_child(?MODULE, []),
+    ok = ?MQ:set_socket( Pid, FriendObj, Socket ),
+    ok = gen_tcp:controlling_process( Socket, Pid ),
+    pg:join( Group, Pid ),
+    {ok, Pid}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -51,7 +57,7 @@ start_mq( Args ) ->
 %% @spec stop_computation( Pid ) -> ok.
 %% @end
 %%--------------------------------------------------------------------
-stop_mq( Pid ) ->
+stop_mq( Pid ) when is_pid( Pid ) ->
     ?DEBUG("Stopping Message Queue (~p)~n", [Pid]),
     supervisor:stop_child(?MODULE, Pid).
 

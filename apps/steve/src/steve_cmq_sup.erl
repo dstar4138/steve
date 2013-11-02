@@ -3,6 +3,9 @@
 %%  The Connection server will spawn new message queues underneith this 
 %%  supervisor. It handles the connection logic and process group addition. 
 %%
+%%  Ultimately I would like to merge this with steve_cmq_sup then abstract
+%%  the entire async communication service to an external application.
+%%
 %% @author Alexander Dean
 -module(steve_cmq_sup).
 -behaviour(supervisor).
