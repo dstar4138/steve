@@ -33,7 +33,11 @@ encode( Msg ) -> <<"null">>.
 
 
 %% ===========================================================================
-%%
+%% Internal Functions
 %% ===========================================================================
 
+%% @hidden
+%% @doc Decodes a Proplist into a papi record. See papi.hrl for record 
+%%  definitions.
+%% @end
 decode( PList ) -> ok.

@@ -92,6 +92,7 @@ send_to_client( CliID, RawData ) ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
+    ?DEBUG("MQ startup success.",[]),
     {ok, 'WAIT_FOR_SOCKET', #state{}}.
 
 %%--------------------------------------------------------------------
@@ -111,8 +112,11 @@ init([]) ->
 
 %% Waiting for a socket from steve_conn. Should happen fairly quickly.
 'WAIT_FOR_SOCKET'( {socket_ready, CID, Sock}, State ) when is_port( Sock ) ->
-    inet:setopts( Sock, [{active, once}, {packet, 2}, binary]),
+    ?DEBUG("Recieved socket and Client ID in MQ.",[]),
+    inet:setopts( Sock, [{active, once}, binary]),
+    ?DEBUG("Successfully set socket options.",[]),
     {ok, {IP, _Port}} = inet:peername(Sock),
+    ?DEBUG("Successfully extracted foreign peer for reference",[]),
     {next_state, 'WAIT_FOR_DATA', State#state{ sock=Sock, addr=IP, cliID=CID}};
 'WAIT_FOR_SOCKET'( Msg, State ) ->
     ?ERROR("steve_cmq:wait_for_sock","Bad event: ~p",[Msg]),
@@ -240,8 +244,9 @@ process( Msg , NextState, State = #state{sock=S}) ->
     ?DEBUG("Processing CAPI Message in State server: ~p", [Msg]),
     case steve_state:process_cmsg( Msg ) of
         {reply, Rep} -> 
-            ?DEBUG("State server says to reply with: ~p",[Rep]),
-            gen_tcp:send( S, capi:encode(Rep) ),
+            RepEnc = capi:encode( Rep ),
+            ?DEBUG("State server says to reply with: ~p",[RepEnc]),
+            gen_tcp:send( S, RepEnc ),
             {next_state, NextState, State};            
         noreply ->
             ?DEBUG("State server says not to reply.", []),

@@ -29,9 +29,10 @@ parse( RawData ) ->
 %% sent back to Client.
 %% @end
 -spec encode( cmsg_ret() ) -> binary().
-encode( #capi_reqdef{ id=ID, cnt=Cnt } ) -> 
+encode( #capi_reqdef{ id=ID, cnt=Cnt } ) ->
+   BID = erlang:list_to_binary( steve_util:uuid_to_str(ID)), 
     steve_util:encode_json( [{<<"msg">>,<<"reqdef">>},
-                             {<<"id">>,ID},
+                             {<<"id">>,BID},
                              {<<"cnt">>,Cnt}] );
 encode( #capi_comp_ret{ cid=CID, sock=Conn } ) ->
     Port = 
@@ -74,8 +75,8 @@ decode( PList ) ->
 
 %% @hidden
 %% @doc Get proplist key, used in decode/1.
-gv( Key, List ) -> proplists:get_val( Key, List, nil ).
-gvb( Key, List ) -> proplists:get_val( Key, List, false ).
+gv( Key, List ) -> proplists:get_value( Key, List, nil ).
+gvb( Key, List ) -> proplists:get_value( Key, List, false ).
 
 %% @hidden
 %% @doc Builds a Query message, or returns invalid_msg error if it's not a 

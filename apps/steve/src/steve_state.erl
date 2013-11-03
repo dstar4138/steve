@@ -112,16 +112,16 @@ init( StartArgs ) ->
 handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
     Cid = case Id of nil -> steve_util:uuid(); _ -> Id end,
     ReqDef = State#steve_state.reqs,
-    {reply, ?CAPI_REQDEF( Cid, ReqDef ), State}; 
+    {reply, {reply,?CAPI_REQDEF( Cid, ReqDef )}, State}; 
 
 handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) ->
     CID = steve_util:uuid(), % Generate new Computation ID.
     broadcast( {comp_req, Id, CID, Cnt} ), % Broadcast client has new comp-request
     if Files -> % If Client has files to send over, open a connection and inform
             {ok, Conn} = steve_ftp:start_conn( Id, CID ),
-            {reply, ?CAPI_COMP_RET( CID, Conn ), State};
+            {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, State};
         true ->
-            {reply, ?CAPI_COMP_RET( CID ), State}
+            {reply, {reply, ?CAPI_COMP_RET( CID )}, State}
     end;
 handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
     {reply, run_query( Qry, State ), State };
@@ -226,9 +226,9 @@ broadcast( {comp_req, ID, CID, Cnt} ) -> ok.
 
 %% @hidden
 %% @doc Handle a query and respond.
-run_query( peers, _ )   -> ?CAPI_QRY_RET( steve_conn:get_friend_count() );
-run_query( clients, _ ) -> ?CAPI_QRY_RET( steve_conn:get_client_count() );
+run_query( peers, _ )   -> {reply, ?CAPI_QRY_RET( steve_conn:get_friend_count() )};
+run_query( clients, _ ) -> {reply, ?CAPI_QRY_RET( steve_conn:get_client_count() )};
 run_query( {cid, CID}, #steve_state{db=DB} ) -> 
-    ?CAPI_QRY_RET( steve_db:check_cid(DB, CID) );
-run_query( _, _ ) -> ?CAPI_QRY_ERR( <<"Unknown Query">> ).
+    {reply, ?CAPI_QRY_RET( steve_db:check_cid(DB, CID) )};
+run_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
