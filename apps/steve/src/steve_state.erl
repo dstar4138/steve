@@ -118,8 +118,13 @@ handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) -
     CID = steve_util:uuid(), % Generate new Computation ID.
     broadcast( {comp_req, Id, CID, Cnt} ), % Broadcast client has new comp-request
     if Files -> % If Client has files to send over, open a connection and inform
-            {ok, Conn} = steve_ftp:start_conn( Id, CID ),
-            {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, State};
+            case steve_ftp:get_conn_port() of
+                {error, Reason} ->
+                    ?ERROR("steve_state:handle_call",Reason,[]),
+                    {reply, {reply,?CAPI_COMP_RET( CID)}, State};
+                Conn -> 
+                    {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, State}
+            end;
         true ->
             {reply, {reply, ?CAPI_COMP_RET( CID )}, State}
     end;
