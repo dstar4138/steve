@@ -22,7 +22,7 @@
 % The name of the gen_server process made by using Group.
 -define(MOD( G ), erlang:list_to_atom( erlang:atom_to_list( G ) ++ "_serve" )).
 % The socket options for the Welcome Socket.
--define(SOCK_OPTS,[binary, {reuseaddr,true}, {keepalive, true}, 
+-define(SOCK_OPTS,[binary, {packet,line}, {reuseaddr,true}, {keepalive, true}, 
                    {backlog, 30}, {active,false}]).
 
 %% API

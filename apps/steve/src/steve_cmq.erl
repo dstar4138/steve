@@ -113,7 +113,7 @@ init([]) ->
 %% Waiting for a socket from steve_conn. Should happen fairly quickly.
 'WAIT_FOR_SOCKET'( {socket_ready, CID, Sock}, State ) when is_port( Sock ) ->
     ?DEBUG("Recieved socket and Client ID in MQ.",[]),
-    inet:setopts( Sock, [{active, once}, binary]),
+    inet:setopts( Sock, [{active, once},{packet,line}, binary]),
     ?DEBUG("Successfully set socket options.",[]),
     {ok, {IP, _Port}} = inet:peername(Sock),
     ?DEBUG("Successfully extracted foreign peer for reference",[]),
