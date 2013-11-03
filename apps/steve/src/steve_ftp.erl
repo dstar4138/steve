@@ -11,6 +11,7 @@
 
 -include("steve.hrl").
 -include("debug.hrl").
+-define(DEBUGGING, true). % ADDED to toggle validation checking
 
 % This is a TFTP Callback module for handling File Transfers from clients.
 -behaviour(tftp).
@@ -56,15 +57,13 @@ get_conn_port() ->
 
 %% @doc Prepares open of a file on the client side.
 prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
-    case validate_options( Peer, Access, Filename ) of
-        false -> {error, {eacces, "Invalid Filename for that type of access."}};
-        true  -> (case 
-            tftp_file:prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
-        of
-            {ok, AcceptedOptions, State} -> 
-                          {ok, AcceptedOptions, wrap({Filename},State)};
-            Msg -> Msg
-        end)
+    ?DEBUG("-->Got TFTP Prepare Request: (~p,~p,~p)",[Access,Filename,Mode]),
+    case 
+        tftp_file:prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
+    of
+        {ok, AcceptedOptions, State} -> 
+                {ok, AcceptedOptions, wrap({Filename},State)};
+        Msg -> Msg
     end.
 
 %% ------------------------------------------------------------------------- %%
@@ -72,11 +71,15 @@ prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
 
 %% @doc Opens a file for read/write access.
 open( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
-    case
-        tftp_file:open( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
-    of
-        {ok, Opts, State} -> {ok, Opts, wrap( {Filename}, State )};
-        Msg -> Msg
+    ?DEBUG("-->GOT TFTP OPEN Request: (~p, ~p, ~p)",[Access,Filename,Mode]),
+    case validate_options( Peer, Access, Filename ) of
+        false -> {error, {acces, "Invalid Filename for that type of access."}};
+        true  -> (case
+            tftp_file:open( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
+        of
+            {ok, Opts, State} -> {ok, Opts, wrap( {Filename}, State )};
+            Msg -> Msg
+        end)
     end.
 
 %% @doc Reads a chunk of a file from the wire. Triggers state server 
@@ -123,14 +126,14 @@ abort( Code, Text, State ) ->
 validate_options( Peer, write, FileName ) ->
     case get_compid( FileName ) of
         {ok, CompID} -> steve_state:peer_write_perm_check( Peer, CompID );
-        _ -> false
+        _ -> (if ?DEBUGGING -> true; true-> false end) %TODO: REMOVE AFTER TESTING, set to false
     end;
 validate_options( Peer, read, "res." ++ FileName ) ->
     case get_compid( FileName ) of
         {ok, CompID} -> steve_state:peer_read_perm_check( Peer, CompID );
-        _ -> false
+        _ -> (if ?DEBUGGING -> true; true-> false end) %TODO: REMOVE AFTER TESTING, set to false
     end;
-validate_options( _, _, _ ) -> true. %TODO: Set to false after testing!!
+validate_options( _, _, _ ) -> (if ?DEBUGGING -> true; true->false end). %TODO: REMOVE AFTER TESTING, set to false
 
 
 %% @hidden 
@@ -170,6 +173,7 @@ wrap( {F}, State ) -> #overlap_state{ internal = State, filename = F }.
 %%   processing, Steve needs to know it has the file.
 %% @end
 trigger( Action, {FileName}, FileSize ) ->
+    ?DEBUG("TFTP Event Trigger: ~p", [{Action, FileName, FileSize}]),
     case get_compid( FileName ) of
         {ok, CompID} ->
             steve_util:peer_file_event( CompID, {Action, FileName, FileSize} );
