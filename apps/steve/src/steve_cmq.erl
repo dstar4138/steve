@@ -256,6 +256,9 @@ process( Msg , NextState, State = #state{sock=S}) ->
             {stop, Reason, State}
     end.
 
-send( << BMsg/binary>> , State = #state{sock=S}) -> 
-    gen_tcp:send(S, <<BMsg, $\n>>).
+%% @hidden
+%% @doc Since we are using {packet,line} based sockets we need to wrap all 
+%%  send calls with an appendage of a new line.
+%% @end
+send( S, << BMsg/binary>> ) -> gen_tcp:send(S, <<BMsg/binary, $\n>>).
 

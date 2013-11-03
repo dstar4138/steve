@@ -29,10 +29,9 @@ parse( RawData ) ->
 %% sent back to Client.
 %% @end
 -spec encode( cmsg_ret() ) -> binary().
-encode( #capi_reqdef{ id=ID, cnt=Cnt } ) ->
-   BID = erlang:list_to_binary( steve_util:uuid_to_str(ID)), 
+encode( #capi_reqdef{ id=ID, cnt=Cnt } ) -> 
     steve_util:encode_json( [{<<"msg">>,<<"reqdef">>},
-                             {<<"id">>,BID},
+                             {<<"id">>,uuid_encode( ID )},
                              {<<"cnt">>,Cnt}] );
 encode( #capi_comp_ret{ cid=CID, sock=Conn } ) ->
     Port = 
@@ -40,7 +39,7 @@ encode( #capi_comp_ret{ cid=CID, sock=Conn } ) ->
            true -> [{<<"port">>,Conn}]
         end,
     steve_util:encode_json( [{<<"msg">>,<<"comp">>},
-                             {<<"cid">>,CID} | Port ] );
+                             {<<"cid">>,uuid_encode(CID)} | Port ] );
 encode( #capi_query_ret{ success=Success, result = Res } ) ->
     Msg = case Success of
                 true -> <<"qr">>;
@@ -53,13 +52,19 @@ encode( #capi_query_ret{ success=Success, result = Res } ) ->
 %% ===========================================================================
 
 %% @hidden
+%% @doc Encodes a UUID value for sending out.
+uuid_encode( ID ) -> erlang:list_to_binary( steve_util:uuid_to_str( ID ) ).
+
+%% @hidden
 %% @doc Converts a json-proplist into a capi erlang record. See capi.hrl for
 %% record definitions.
 %% @end
 decode( PList ) ->
     case gv(<<"msg">>, PList ) of
-        <<"reqdef">> -> 
-            {ok, ?CAPI_REQDEF( gv( <<"id">>, PList ) )};
+        <<"reqdef">> ->
+            ID = try steve_util:str_to_uuid( gv(<<"id">>,PList) )
+                 catch _:_ -> nil end,
+            {ok, ?CAPI_REQDEF( ID )};
         <<"qry">> -> 
             (case gv(<<"cnt">>, PList) of
                     nil -> {error, invalid_msg};
