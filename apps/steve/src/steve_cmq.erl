@@ -126,7 +126,7 @@ init([]) ->
 %% Any data coming from the socket is handled by handle_info/3.
 'WAIT_FOR_DATA'( {send, CliID, Bin}, #state{sock = Sock, cliID=C} = State ) ->
     case CliID of % Only send if our Client ID matches, otherwise discard.
-        C -> gen_tcp:send( Sock, Bin );
+        C -> send( Sock, Bin );
         _ -> ignore
     end,        
     {next_state, 'WAIT_FOR_DATA', State, ?TIMEOUT};
@@ -202,7 +202,7 @@ handle_info( {pg_message, _From, ?CLIENT_GROUP, GroupMsg}, StateName,
             {stop, normal, State};
         {send, Cid, Data} ->
             ?DEBUG("Sending data to client (~p): ~p", [Cid, Data]),
-            ok = gen_tcp:send( S, Data ),
+            ok = send( S, Data ),
             {next_state, StateName, State, ?TIMEOUT};
         _ -> % Unknown message
             ?DEBUG("Unknown Group message, ignoring: ~p",[GroupMsg]),
@@ -234,7 +234,7 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 %% @hidden
 %% @doc Send an error as a message back over the wire.
 handle_error( Err, _State = #state{sock=S} ) -> 
-    gen_tcp:send( S, steve_util:encode_json([{<<"error">>,Err}]) ).
+    send( S, steve_util:encode_json([{<<"error">>,Err}]) ).
 
 %% @hidden
 %% @doc Send message to state server for processing, wait for reply and either
@@ -246,7 +246,7 @@ process( Msg , NextState, State = #state{sock=S}) ->
         {reply, Rep} -> 
             RepEnc = capi:encode( Rep ),
             ?DEBUG("State server says to reply with: ~p",[RepEnc]),
-            gen_tcp:send( S, RepEnc ),
+            send( S, RepEnc ),
             {next_state, NextState, State};            
         noreply ->
             ?DEBUG("State server says not to reply.", []),
@@ -255,4 +255,7 @@ process( Msg , NextState, State = #state{sock=S}) ->
             ?DEBUG("State server says for MQ to shutdown with reason: ~p",[Reason]),
             {stop, Reason, State}
     end.
+
+send( << BMsg/binary>> , State = #state{sock=S}) -> 
+    gen_tcp:send(S, <<BMsg, $\n>>).
 
