@@ -161,7 +161,7 @@ handle_info( {inet_async, _ListSock, _Ref, Error}, State ) ->
 handle_info( {'EXIT', Pid, Status}, #state{mqs=MQs} = State ) ->
     ?ERROR("steve_conn:handle_info", "Message Queue crashed with message: ~p",[Status]),
     NewMQs = lists:keydelete( Pid, 1, MQs ),
-    {noreply, State=#state{ mqs=NewMQs }};
+    {noreply, State#state{ mqs=NewMQs }};
 
 handle_info( Msg, State ) ->
     ?DEBUG("Conn server should not be getting misc msgs ( ~p ):~p",[Msg,State]),
