@@ -14,6 +14,11 @@
 -export([parse/1]).
 -export([encode/1]).
 
+% Message keys
+-define(M,<<$m>>).
+-define(C,<<$c>>).
+-define(V,<<$v>>).
+
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
 %% message record.
 %% @end
@@ -28,7 +33,7 @@ parse( RawData ) ->
 %% @doc Encodes a PAPI message (from server) into a binary string that can be
 %% sent back to a Peer.
 %% @end
--spec encode( fmsg_ret() ) -> binary().
+-spec encode( fmsg() ) -> binary().
 encode( Msg ) -> <<"null">>.
 
 

@@ -9,6 +9,7 @@
 -include("debug.hrl").
 -include("steve_obj.hrl").
 -include("capi.hrl").
+-include("papi.hrl").
 
 %% API
 -export([start_link/1]).
@@ -131,6 +132,9 @@ handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) -
 handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
     {reply, run_query( Qry, State ), State };
 
+handle_call({pmsg, #papim{type=Type, cnt=Cnt, val=Val}}, _From, State) ->
+    {Ret, NewState} = handle_papim( Type, Cnt, Val, State ),
+    {reply, Ret, NewState};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -227,6 +231,7 @@ b( N ) when is_atom( N ) -> erlang:atom_to_binary( N, unicode ).
 %% @hidden
 %% @doc Broadcast a message to all friends/peers.
 broadcast( update ) -> ok; %TODO: Actually push message to steve_conn
+                           %TODO: Need way of ignoring particular peers.
 broadcast( {comp_req, ID, CID, Cnt} ) -> ok.
 
 %% @hidden
@@ -236,4 +241,61 @@ run_query( clients, _ ) -> {reply, ?CAPI_QRY_RET( steve_conn:get_client_count() 
 run_query( {cid, CID}, #steve_state{db=DB} ) -> 
     {reply, ?CAPI_QRY_RET( steve_db:check_cid(DB, CID) )};
 run_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
+
+%% @hidden
+%% @doc Handles the Peer API, all other PAPIM types are not messages expected
+%%   from other peers.
+%% @end
+handle_papim( ?PAPI_COMPREQ, Cnt, _Val, #steve_state{caps=Cap} = _State ) -> 
+   case requests:match( Cap, Cnt ) of
+       {ok, nomatch} -> 
+           ok; %TODO: no match, so broadcast to all friends except sender.
+               % Remember to reduce the jump count in the message 
+       {ok, Cap} -> 
+           ok; %TODO: capable, so send back ack. and save reqdef hash for ref
+       {error, badcaps} -> 
+           ?ERROR("steve_state:handle_papim",
+                  "Found Bad capability when trying to match: ~p", [Cnt]),
+           noreply
+    end;
+handle_papim( ?PAPI_COMPACK, Cnt, _Val, State ) ->
+    %TODO: check in state if we sent it,
+    %   if yes, then update db with new handler. If new friend, connect and 
+    %       start transfer for archive.
+    %   otherwise, forward it on to the peer that send the req through you.
+    ok;
+handle_papim( ?PAPI_RESCAST, Cnt, _Val, State ) -> 
+    %TODO: Check if we have the result stored,
+    %   if yes, then discard.
+    %   otherwise, save and perpetuate broadcast.
+    ok;
+handle_papim( ?PAPI_RESREQ, Cnt, _Val, State ) ->
+    %TODO: Check if we have the results stored,
+    %   if yes, then send peer directly a RESCAST message for each ID
+    %   otherwise,
+    %       if we've heard of ID before, perpetuate RESREQ message onward
+    %       otherwise, discard.
+    ok;
+handle_papim( ?PAPI_REPCHK, Cnt, _Val, State ) -> 
+    %TODO: If we have a reputation for this individual, send back REPACK.
+    %   Otherwise we replace from field with self and save maping and broadcast
+    %       to others. 
+    ok;
+handle_papim( ?PAPI_REPACK, Cnt, _Val, State ) -> 
+    %TODO: Did we send the REPCHK?
+    %   if yes, then augment our rep with the new rep ack
+    %   otherwise, wrap with our rep
+    ok;
+handle_papim( ?PAPI_FRNDREQ, Cnt, _Val, State ) -> 
+    %TODO: Grab top half of peers based on reputation and filter by
+    %   Cnt, which is a list of already known peers. Fwd FRNDREQ to them.
+    %   Send FRNDACK if you are not on the ignore list. If there are any 
+    %   unrecognized values in Cnt List, we may want to send a Frndreq
+    %   of our own if we are in a starved state
+    ok;
+handle_papim( ?PAPI_FRNDACK, Cnt, _Val, State ) -> 
+    %%TODO: Did we send a FRNDREQ?
+    %%  if yes, then potentially add FRND to peer's list. 
+    ok.
+
 
