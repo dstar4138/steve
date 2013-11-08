@@ -8,13 +8,13 @@
 
 -define(DEFAULT_PPORT, 50505).
 -define(DEFAULT_CPORT, 51343).
--define(DEFAULT_RCFILE, "~/.steverc").
+-define(DEFAULT_RCFILE, "~/.config/steve/steverc").
 
 %% API
--export([start_link/1]).
+-export([start_link/2]).
 
 %% Supervisor callbacks
--export([init/1]).
+-export([init/2]).
 
 -define(NCHILD(ID, Mod, Type, Args), {ID, {Mod, start_link, Args},
                                      permanent, 5000, Type, [Mod]}).
@@ -32,8 +32,8 @@
 %% @spec start_link( Args ) -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link( StartArgs ) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, StartArgs).
+start_link( System, StartArgs ) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [System, StartArgs]).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -52,7 +52,7 @@ start_link( StartArgs ) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init( StartArgs ) ->
+init( System, StartArgs ) ->
     process_flag(trap_exit, true),
     {ok, PPort, CPort} = get_conn_ports(),
     {ok, RCFile} = get_rcfile(),
@@ -60,7 +60,8 @@ init( StartArgs ) ->
                 ?CHILD(steve_fmq_sup, supervisor, []) % F-CONN MQ Supervisor
                ,?CHILD(steve_cmq_sup, supervisor, []) % C-CONN MQ Supervisor
                ,?CHILD(steve_comp_sup, supervisor, []) % Computation Server
-               ,?CHILD(steve_state, worker, [{rcfile,RCFile}|StartArgs]) % State Server
+               ,?CHILD(steve_state, worker, [{rcfile,RCFile}, 
+                                             {sys, System}|StartArgs]) % State Server
                ,?NCHILD(fconn, steve_conn, worker, [friends, steve_fmq_sup, PPort]) % Peer Server
                ,?NCHILD(cconn, steve_conn, worker, [clients, steve_cmq_sup, CPort]) % Client Server
          ]}}.

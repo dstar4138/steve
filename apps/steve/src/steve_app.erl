@@ -31,9 +31,11 @@
 %%--------------------------------------------------------------------
 start(_StartType, StartArgs) ->
     ?DEBUG("Starting Inets service for TFTP...",[]),
-    {ok, Pid} = startup_inets(),
+    {ok, _Pid} = startup_inets(),
+    ?DEBUG("Starting Local persistant storage service...",[]),
+    System = startup_mnesia(),
     ?DEBUG("Starting Steve Daemon...",[]),
-    steve_sup:start_link( StartArgs ).
+    steve_sup:start_link( System, StartArgs ).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -73,4 +75,14 @@ startup_inets() ->
         Err -> Err
     end.
 
-    
+%% @hidden
+%% @doc Starts the Mnesia database based on application environment or the
+%%  starting arguments.
+%% @end
+startup_mnesia() -> 
+    SaveDir = case application:get_env(steve, db_loc) of
+                    undefined -> steve_util:getrootdir()++"/db";
+                    {ok, Dir} -> Dir
+              end,
+    steve_db:verify_install(SaveDir). % Will start Mnesia daemon if not running.
+

@@ -36,9 +36,10 @@
         has_archive = false        :: boolean(),
         % The request object, if we have it yet. If not, then it needs to 
         % be written.
-        req                        :: 'REQUEST'() 
+        req                        :: 'REQUEST'(), 
         % Has at least one friend told us it's finished.
         finished = false           :: boolean(),
+        all_finished = false       :: boolean(),
         % Do we have the results saved locally?
         has_result_locally = false :: boolean(),
         % Which Friends are working on it?
