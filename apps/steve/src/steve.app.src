@@ -7,7 +7,18 @@
   {mod, {steve_app, []}},
   {env, 
    [        % Default Requests Configuration File Location
-            {rcfile, "~/.steverc"},
+            %{rcfile, "~/.config/steve/steverc"}, %Default
+            {rcfile, "./conf/steverc"},
+
+            % Override Database location
+            %{db_loc, "~/.config/steve/db"}, %Default
+
+            % Override Local FTP configuration (for result/computation storage)
+            %{tftp, [
+            %    {port, 0},      % Defaults to picking random open port
+            %    {debug, all},   % Ouput debug information
+            %    {root_dir, "~/.config/steve/compserve"} 
+            %       ]},
 
             % Port to connect to with client:
             {cport, 51343},
@@ -16,9 +27,9 @@
             {fport, 50505},
 
             % White-listed friends:
-            {friends, [ "192.168.1.1", 
-                        "turkish.students.rit.edu"
-                        %...
+            {friends, [ % "192.168.1.1", 
+                        % "example.steve.rit.edu"
+                        % ...
                       ]}
     ]}
  ]

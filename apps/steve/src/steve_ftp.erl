@@ -11,15 +11,13 @@
 
 -include("steve.hrl").
 -include("debug.hrl").
--define(DEBUGGING, true). % ADDED to toggle validation checking
 
 % This is a TFTP Callback module for handling File Transfers from clients.
 -behaviour(tftp).
 -export([prepare/6, open/6, read/1, write/2, abort/3]).
 -define(ROOTDIR, {root_dir,  steve_util:getrootdir()++"/compserve"}).
--define(DEFAULT_CONFIG, [ {port,0},
-                          {debug,all},
-                          {callback, {".*", ?MODULE, [?ROOTDIR]}} ]).
+-define(CALLBACK( DIR ), {callback, {".*", ?MODULE, [DIR]}}).
+-define(DEFAULT_CONFIG, [ {port,0}, {debug,all}, ?CALLBACK(?ROOTDIR) ]).
 
 % Internal Steve API.
 -export([ get_config/0, % Get TFTPd Startup Config, called in steve_app:start/2
@@ -35,10 +33,10 @@
 
 %% @doc Get the default configuration for TFTP.
 -spec get_config() -> string().
-get_config() ->
+get_config() -> % TODO: get from RC file.
     case application:get_env(steve, tftp) of
         undefined -> ?DEFAULT_CONFIG;
-        {ok, P} -> P
+        {ok, P} -> fix_env_configs( P )
     end.
 
 %% @doc Get the port Clients will need to connect to for file transfers.
@@ -73,7 +71,7 @@ prepare( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
 open( Peer, Access, Filename, Mode, SuggestedOptions, Initial ) ->
     ?DEBUG("-->GOT TFTP OPEN Request: (~p, ~p, ~p)",[Access,Filename,Mode]),
     case validate_options( Peer, Access, Filename ) of
-        false -> {error, {acces, "Invalid Filename for that type of access."}};
+        false -> {error, {eacces, "Invalid Filename for that type of access."}};
         true  -> (case
             tftp_file:open( Peer, Access, Filename, Mode, SuggestedOptions, Initial )
         of
@@ -125,15 +123,15 @@ abort( Code, Text, State ) ->
 %% @end
 validate_options( Peer, write, FileName ) ->
     case get_compid( FileName ) of
-        {ok, CompID} -> steve_state:peer_write_perm_check( Peer, CompID );
-        _ -> (if ?DEBUGGING -> true; true-> false end) %TODO: REMOVE AFTER TESTING, set to false
+        {ok, CompID} -> steve_state:peer_perm_check( write, Peer, CompID );
+        _ -> false
     end;
-validate_options( Peer, read, "res." ++ FileName ) ->
+validate_options( Peer, read, "res." ++ FileName ) -> %Filename needs 'res.'
     case get_compid( FileName ) of
-        {ok, CompID} -> steve_state:peer_read_perm_check( Peer, CompID );
-        _ -> (if ?DEBUGGING -> true; true-> false end) %TODO: REMOVE AFTER TESTING, set to false
+        {ok, CompID} -> steve_state:peer_perm_check( read, Peer, CompID );
+        _ -> false
     end;
-validate_options( _, _, _ ) -> (if ?DEBUGGING -> true; true->false end). %TODO: REMOVE AFTER TESTING, set to false
+validate_options( _, _, _ ) -> false. 
 
 
 %% @hidden 
@@ -176,8 +174,20 @@ trigger( Action, {FileName}, FileSize ) ->
     ?DEBUG("TFTP Event Trigger: ~p", [{Action, FileName, FileSize}]),
     case get_compid( FileName ) of
         {ok, CompID} ->
-            steve_util:peer_file_event( CompID, {Action, FileName, FileSize} );
+            steve_state:peer_file_event( CompID, {Action, FileName, FileSize} );
         _ -> 
             ?ERROR( "steve_ftp:trigger", "Unable to get UUID: ~p",[FileName])
     end.
 
+%% @hidden
+%% @doc Fixes the read in environment to pull out options that we don't except.
+fix_env_configs( L ) -> fix_env_configs( L, [] ).
+fix_env_configs( [], A ) -> A;
+fix_env_configs( [{root_dir, Val}|R], A ) -> 
+    % Turn the root_dir value into the callback value.
+    fix_env_configs(R,[?CALLBACK(Val)|A]);
+fix_env_configs( [X = {Option, Value}|R], A ) ->
+    case lists:member( Option, [ port, debug, max_conn, logger ] ) of
+        true -> fix_env_configs(R,[X|A]);
+        false -> fix_env_configs(R,A)
+    end.
