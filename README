@@ -60,10 +60,11 @@ change him, send us a pull request and we'll take a look at it.
 
 REQUIREMENTS:
 
-  Steve only needs a few things to get started:
+  Steve has only been tested on Mac OS X and Debian Linux. The windows platform
+is currently not supported. Steve only needs a few things to get started:
     
     - Erlang (minimum version R15B01)
-
+    - libcap-dev (for erlexec package, to monitor OS processes)
 
 BUILDING:
 
