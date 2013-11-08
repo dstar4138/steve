@@ -65,10 +65,11 @@
            val :: term()
           }).
 %% ------------------------------------------- %%
+-define(TABLE_LIST, [t_me, t_comp, t_friend]).
 -define(TABLES, [
-                 {t_me, record_info(fields, t_me), [key]},
-                 {t_comp, record_info(fields, t_comp), [id,cid]},
-                 {t_friend, record_info(fields, t_friend), [id]}
+                 {t_me, record_info(fields, t_me), []},
+                 {t_comp, record_info(fields, t_comp), [fid]},
+                 {t_friend, record_info(fields, t_friend), []}
                 ]).
 
 -export( [ verify_install/1 ] ).
@@ -84,10 +85,10 @@
 
 %% @doc Install the Database on the local system based on the passed in options.
 verify_install( Dir ) -> 
-    ok = application:start(mnesia),
-    ok = create_schema( Dir ),
-    ok = make_tables( ),
-    connect_to_mnesia().
+    create_schema( Dir ),           % Sets up disk
+    ok = application:start(mnesia), % Load to memory
+    ok = make_tables( ),            % Create disc copies
+    connect_to_mnesia().            % Wait for locks on tables, get init state
 
 
 %% @doc Set a value in the state's key-value store. Should be used sparingly!!
@@ -272,7 +273,8 @@ capture_progress( Comp, CIDs ) when is_record( Comp, computation ) and
 %% @hidden
 %% @doc Creates the local files on disc to store the persistant state.
 create_schema( Dir ) ->
-    try 
+    try
+        ok = filelib:ensure_dir( Dir ), 
         application:set_env( mnesia, dir, Dir ), % Override save location.
         mnesia:create_schema([node()])
     catch 
@@ -308,15 +310,18 @@ make_tables() ->
 %% @end 
 create_table( {TabName, Info, Index} ) ->
     ?DEBUG("Building table ~p in mnesia.",[TabName]),
-    DefaultOpts = [{attributes, Info}, {type, ordered_set}, {disc_copies, [node()]}],
+    DefaultOpts = [{attributes, Info}, 
+                   {type, ordered_set}, 
+                   {disc_copies, [node()]}],
     CrOption = if
                    length(Index) > 0 -> [{index, Index} | DefaultOpts ];
                    true -> DefaultOpts
                end,
     case mnesia:create_table( TabName, CrOption ) of
         {atomic, ok} -> fill_defaults( TabName );
-        {aborted,Reason} ->
-            ?ERROR("Failed to create table ~p because: ~p", [TabName, Reason])
+        {aborted, Reason} ->
+            ?ERROR("steve_db:create_table",
+                   "Failed to create table ~p because: ~p", [TabName, Reason])
     end.
 
 %% @hidden
@@ -325,7 +330,7 @@ create_table( {TabName, Info, Index} ) ->
 %%   node.
 %% @end
 connect_to_mnesia() ->
-    case mnesia:wait_for_tables( ?TABLES, 5000 ) of
+    case mnesia:wait_for_tables( ?TABLE_LIST, 5000 ) of
         ok -> load_state();
         {timeout, BadTabList} -> 
             (case mnesia:wait_for_tables( BadTabList, 5000 ) of

@@ -14,7 +14,7 @@
 -export([start_link/2]).
 
 %% Supervisor callbacks
--export([init/2]).
+-export([init/1]).
 
 -define(NCHILD(ID, Mod, Type, Args), {ID, {Mod, start_link, Args},
                                      permanent, 5000, Type, [Mod]}).
@@ -52,18 +52,20 @@ start_link( System, StartArgs ) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init( System, StartArgs ) ->
-    process_flag(trap_exit, true),
+init( [System, StartArgs] ) ->
+%    process_flag(trap_exit, true),
     {ok, PPort, CPort} = get_conn_ports(),
     {ok, RCFile} = get_rcfile(),
+    Args = [{rcfile,RCFile},{sys,System}|StartArgs],
     {ok, {{one_for_one, 5, 10}, [
-                ?CHILD(steve_fmq_sup, supervisor, []) % F-CONN MQ Supervisor
-               ,?CHILD(steve_cmq_sup, supervisor, []) % C-CONN MQ Supervisor
+                ?CHILD(steve_fmq_sup, supervisor, [])  % F-CONN MQ Supervisor
+               ,?CHILD(steve_cmq_sup, supervisor, [])  % C-CONN MQ Supervisor
                ,?CHILD(steve_comp_sup, supervisor, []) % Computation Server
-               ,?CHILD(steve_state, worker, [{rcfile,RCFile}, 
-                                             {sys, System}|StartArgs]) % State Server
-               ,?NCHILD(fconn, steve_conn, worker, [friends, steve_fmq_sup, PPort]) % Peer Server
-               ,?NCHILD(cconn, steve_conn, worker, [clients, steve_cmq_sup, CPort]) % Client Server
+               ,?CHILD(steve_state, worker, [Args])      % State Server
+               ,?NCHILD(fconn, steve_conn, worker, 
+                        [friends, steve_fmq_sup, PPort]) % Peer Server
+               ,?NCHILD(cconn, steve_conn, worker, 
+                        [clients, steve_cmq_sup, CPort]) % Client Server
          ]}}.
 
 %%%===================================================================
