@@ -1,11 +1,13 @@
--type steve_query() :: peers | clients | {cid, string()}.
+-include("util_types.hrl"). %For uid().
+
+-type steve_query() :: peers | clients | {cid, uid()}.
 -type steve_compreq() :: [tuple()].
 
 %%
 %% THE FOLLOWING ARE MESSAGES FROM CLIENTS THAT NEED TO BE HANDLED BY STEVE.
 %%
 
--record(capi_reqdef,{id = nil :: nil | string(), cnt = nil :: nil | term() }).
+-record(capi_reqdef,{id = nil :: nil | uid(), cnt = nil :: nil | term() }).
 -define(CAPI_REQDEF( ID ), #capi_reqdef{ id = ID }).
 
 -record(capi_query,{type :: steve_query()}).
@@ -22,7 +24,7 @@
 
 -define(CAPI_REQDEF( ID, Cnt ), #capi_reqdef{ id = ID, cnt = Cnt }).
 
--record(capi_comp_ret, {cid :: string(), sock =nil :: string() | nil}).
+-record(capi_comp_ret, {cid :: uid(), sock = nil :: integer() | nil}).
 -define(CAPI_COMP_RET( CID ), #capi_comp_ret{ cid = CID } ).
 -define(CAPI_COMP_RET( CID, Conn ), #capi_comp_ret{ cid = CID, sock = Conn }).
 
