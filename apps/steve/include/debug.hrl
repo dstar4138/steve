@@ -1,7 +1,7 @@
 -define(DEBUG_RUN, true).
 
 -ifdef(DEBUG_RUN).
--define(DEBUG( Msg, Format ), io:fwrite(Msg++"~n", Format)).
+-define(DEBUG( Msg, Format ), error_logger:info_msg(Msg++"~n", Format)).
 
 -else.
 -define(DEBUG( _, _), true).

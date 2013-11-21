@@ -14,6 +14,7 @@
 %% API
 -export([start_link/0]).
 -export([set_socket/3, send_to_client/2]).
+-export([get_conn_details/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -31,6 +32,7 @@
 -record(state, {
             sock, % Listening socket.
             addr, % Client's address
+            port, % Client's port
             cliID % Client ID for internal reference.
          }).
 
@@ -42,6 +44,16 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc Gets the connection details from the finite state machine.
+%%
+%% @spec get_conn_details( pid() ) -> {IP, Port, ID, Status}.
+%% @end
+%%--------------------------------------------------------------------
+get_conn_details( PID ) ->
+    PID ! {get_conn_details, self()},
+    receive Msg -> Msg end. 
 
 %%--------------------------------------------------------------------
 %% @doc Creates a gen_fsm process which calls Module:init/1 to
@@ -115,9 +127,10 @@ init([]) ->
     ?DEBUG("Recieved socket and Client ID in MQ.",[]),
     inet:setopts( Sock, [{active, once},{packet,line}, binary]),
     ?DEBUG("Successfully set socket options.",[]),
-    {ok, {IP, _Port}} = inet:peername(Sock),
+    {ok, {IP, Port}} = inet:peername(Sock),
     ?DEBUG("Successfully extracted foreign peer for reference",[]),
-    {next_state, 'WAIT_FOR_DATA', State#state{ sock=Sock, addr=IP, cliID=CID}};
+    {next_state, 'WAIT_FOR_DATA', State#state{ sock=Sock, addr=IP, 
+                                               port=Port, cliID=CID}};
 'WAIT_FOR_SOCKET'( Msg, State ) ->
     ?ERROR("steve_cmq:wait_for_sock","Bad event: ~p",[Msg]),
     {next_state, 'WAIT_FOR_SOCKET', State}.
@@ -207,7 +220,11 @@ handle_info( {pg_message, _From, ?CLIENT_GROUP, GroupMsg}, StateName,
         _ -> % Unknown message
             ?DEBUG("Unknown Group message, ignoring: ~p",[GroupMsg]),
             {next_state, StateName, State, ?TIMEOUT}
-    end;    
+    end;
+handle_info( {get_conn_details, From}, StateName, 
+             #state{addr=IP, port=Port, cliID=ID} = State ) ->
+    From ! {IP, Port, ID, StateName},
+    {next_state, StateName, State, ?TIMEOUT};
 handle_info( Msg, StateName, State ) -> 
     ?DEBUG("Unknown Message to MQ: ~p",[Msg]),
     {next_state, StateName, State, ?TIMEOUT}.

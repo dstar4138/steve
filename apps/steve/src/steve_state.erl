@@ -37,7 +37,7 @@
 %%      steve_ftp callback module for file transfers.
 %% @end
 -spec peer_write_perm_check( tuple(), uid() ) -> boolean().
-peer_write_perm_check( Peer, CompID ) -> true. %TODO: verify peer has access
+peer_write_perm_check( _Peer, _CompID ) -> true. %TODO: verify peer has access
 
 
 %% @doc Check if a Client/Friend is connected via MQ and if they have valid
@@ -45,7 +45,7 @@ peer_write_perm_check( Peer, CompID ) -> true. %TODO: verify peer has access
 %%      steve_ftp callback module for file transfers.
 %% @end
 -spec peer_read_perm_check( tuple(), uid() ) -> boolean().
-peer_read_perm_check( Peer, CompID ) -> true. %TODO: verify peer has access
+peer_read_perm_check( _Peer, _CompID ) -> true. %TODO: verify peer has access
 
 %% @doc If an event happens on a particular file, namely if its finished
 %%  writing or reading, steve will most likely need to be informed.

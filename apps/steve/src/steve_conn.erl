@@ -28,6 +28,7 @@
 %% API
 -export([start_link/0,start_link/3]).
 -export([get_friend_count/0, get_client_count/0, check_mq_group/1]).
+-export([get_friend_list/0, get_client_list/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -52,7 +53,27 @@ get_friend_count() -> length( check_mq_group( friends ) ).
 -spec get_client_count() -> non_neg_integer().
 get_client_count() -> length( check_mq_group( clients ) ).
 
+%% @doc Gets a list of friend connections of the status: {IP,Port,ID,Status}.
+-spec get_friend_list() -> [ tuple() ].
+get_friend_list() ->
+    lists:foldl( merge_conn(steve_fmq), [], check_mq_group(friends) ).
 
+%% @doc Gets a list of friend connections of the status: {IP,Port,ID,Status}.
+-spec get_client_list() -> [ tuple() ].
+get_client_list() ->
+    lists:foldl( merge_conn(steve_cmq), [], check_mq_group(clients) ).
+
+%% @private
+%% @doc Used for the get_*_list functions above to call a PID of a MQ and get 
+%%   its connection status and details and merge it with an accumulated list
+%%   so far. We drop bad connections.
+%% @end
+-spec merge_conn( atom() ) -> fun().
+merge_conn( MQ ) ->
+    fun( PID, Acc ) ->
+        [erlang:apply( MQ, get_conn_details, [PID] )|Acc]
+    end.
+        
 %% @doc Get a list of process id's of all message queues in a particular 
 %% process group. There are only two groups, friends | clients. See 
 %% steve_sup for more information.
@@ -146,9 +167,11 @@ handle_info( {inet_async, ListSock, Ref, {ok, CliSocket}},
 
         %% Signal the network driver that we are ready to accept another 
         %% connection.
-        case prim_inet:async_accept(ListSock, -1) of
-            {ok,    NewRef} -> ok;
-            {error, NewRef} -> exit({async_accept, inet:format_error(NewRef)})
+        NewRef = case prim_inet:async_accept(ListSock, -1) of
+            {ok,    NR} -> NR;
+            {error, NR} -> 
+                    exit({async_accept, inet:format_error(NR)}), 
+                    NR
         end,
         {noreply, State#state{ref=NewRef, mqs=[MQRef|MQs]}}
     catch exit:Why ->
