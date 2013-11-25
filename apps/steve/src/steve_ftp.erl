@@ -186,7 +186,7 @@ fix_env_configs( [], A ) -> A;
 fix_env_configs( [{root_dir, Val}|R], A ) -> 
     % Turn the root_dir value into the callback value.
     fix_env_configs(R,[?CALLBACK(Val)|A]);
-fix_env_configs( [X = {Option, Value}|R], A ) ->
+fix_env_configs( [X = {Option, _Value}|R], A ) ->
     case lists:member( Option, [ port, debug, max_conn, logger ] ) of
         true -> fix_env_configs(R,[X|A]);
         false -> fix_env_configs(R,A)

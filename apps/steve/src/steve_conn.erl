@@ -29,6 +29,7 @@
 -export([start_link/0,start_link/3]).
 -export([get_friend_count/0, get_client_count/0, check_mq_group/1]).
 -export([get_friend_list/0, get_client_list/0]).
+-export([esend/3, send/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -44,6 +45,17 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc Send a message to a particular group member.
+-spec send( atom(), any(), any() ) -> ok.
+send( Group, Who, Msg ) -> pg:send( Group, {send, Who, Msg} ), ok.
+
+%% @doc Send a message out to all message queues excluding the ones on the 
+%%   Excludes list. We rely on the implementation of the Message Queue to 
+%%   exclude itself.
+%% @end
+-spec esend( atom(), any(), [any()] ) -> ok.
+esend( Group, Msg, Excludes ) -> pg:send( Group, {fwd, Excludes, Msg} ), ok.
 
 %% @doc Gets the number of currently connected Peers/Friends.
 -spec get_friend_count() -> non_neg_integer().

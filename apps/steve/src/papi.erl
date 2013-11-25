@@ -18,6 +18,7 @@
 -define(M,<<$m>>).
 -define(C,<<$c>>).
 -define(V,<<$v>>).
+-define(F,<<$f>>).
 
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
 %% message record.
@@ -34,7 +35,20 @@ parse( RawData ) ->
 %% sent back to a Peer.
 %% @end
 -spec encode( fmsg() ) -> binary().
-encode( Msg ) -> <<"null">>.
+encode( #papim{from=F, type=T, cnt=C, val=V} ) -> 
+    PropList = 
+        encode_from(F, encode_type(T, encode_cnt(C, encode_val( V, [])))),
+    steve_util:encode_json( PropList ).
+
+encode_from( nil, Acc ) -> Acc;
+encode_from( Code, Acc ) when is_binary( Code ) ->
+    [{?F,uuid_encode( Code )}|Acc].
+encode_type( T, Acc ) when is_integer( T ) -> [{?M,T}|Acc].
+encode_cnt( nil, Acc ) -> Acc;
+encode_cnt( C, Acc ) -> [{?C,C}|Acc].
+encode_val( nil, Acc )-> Acc;
+encode_val( V, Acc ) -> [{?V,V}|Acc].
+      
 
 
 %% ===========================================================================
@@ -42,7 +56,24 @@ encode( Msg ) -> <<"null">>.
 %% ===========================================================================
 
 %% @hidden
+%% @doc Encodes a UUID value for sending out.
+uuid_encode( ID ) -> 
+    erlang:list_to_binary( steve_util:uuid_to_str( ID ) ).
+
+
+%% @hidden
 %% @doc Decodes a Proplist into a papi record. See papi.hrl for record 
 %%  definitions.
 %% @end
-decode( PList ) -> ok.
+decode( PList ) -> 
+    M = gv( ?M, PList ),
+    F = gv( ?F, PList ),
+    C = gv( ?C, PList ),
+    V = gv( ?V, PList ),
+    {ok, #papim{ from=F, type=M, cnt=C, val=V }}.
+
+
+%% @hidden
+%% @doc Get proplist key, used in decode/1.
+gv( Key, List ) -> proplists:get_value( Key, List, nil ).
+

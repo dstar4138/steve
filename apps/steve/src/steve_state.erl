@@ -13,7 +13,7 @@
 
 %% API
 -export([start_link/1]).
--export([process_cmsg/1]).
+-export([process_cmsg/1, process_fmsg/2]).
 -export([peer_write_perm_check/2, 
          peer_read_perm_check/2,
          peer_file_event/2]).
@@ -63,7 +63,7 @@ process_cmsg( Msg ) -> gen_server:call( ?MODULE, {cmsg, Msg} ).
 %% @doc Ask the state server to process a friend's message. This is called
 %% from steve_fmq:process/2.
 %% @end
-process_fmsg( Msg ) -> gen_server:call( ?MODULE, {fmsg, Msg} ).
+process_fmsg( F, Msg ) -> gen_server:call( ?MODULE, {fmsg, F, Msg} ).
 
 
 %%--------------------------------------------------------------------
@@ -121,7 +121,7 @@ handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) -
     if Files -> % If Client has files to send over, open a connection and inform
             case steve_ftp:get_conn_port() of
                 {error, Reason} ->
-                    ?ERROR("steve_state:handle_call",Reason,[]),
+                   ?ERROR("steve_state:handle_call",Reason,[]),
                     {reply, {reply,?CAPI_COMP_RET( CID)}, State};
                 Conn -> 
                     {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, State}
@@ -132,9 +132,9 @@ handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) -
 handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
     {reply, run_query( Qry, State ), State };
 
-handle_call({pmsg, #papim{type=Type, cnt=Cnt, val=Val}}, _From, State) ->
-    {Ret, NewState} = handle_papim( Type, Cnt, Val, State ),
-    {reply, Ret, NewState};
+handle_call({fmsg, Friend, #papim{from=F, type=Type, cnt=Cnt, val=Val}}, _From, State) ->
+    handle_papim( Type, Friend, F, Cnt, Val, State ),
+    {reply, ok, State};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -229,10 +229,23 @@ b( N ) when is_atom( N ) -> erlang:atom_to_binary( N, unicode ).
 %%% Messaging Handlers
 
 %% @hidden
-%% @doc Broadcast a message to all friends/peers.
-broadcast( update ) -> ok; %TODO: Actually push message to steve_conn
-                           %TODO: Need way of ignoring particular peers.
-broadcast( {comp_req, ID, CID, Cnt} ) -> ok.
+%% @doc Broadcast a message to ALL friends/peers. To limit who to not send to
+%%   use the forward/2 function.
+%%         Accepted Messages: update | {comp_req, ID, CID, Cnt}
+%% @end        
+broadcast( Msg ) -> 
+    Friends = steve_conn:check_mq_group( friends ),
+    lists:foldl( fun ( Peer, _ ) -> Peer ! Msg end, ok, Friends ).
+
+%% @hidden
+%% @doc Similar to broadcast, but will forward to all friends/peers except the 
+%%   excluded friend. This is for requests that we can't personally fill.
+%% @end  
+forward( ExcludedFriend, Msg ) ->
+    OldFwdID = Msg#papim.from, 
+    NewFwdID = steve_db:save_and_mask_msg( OldFwdID, ExcludedFriend ),
+    NewMsg = Msg#papim{ from = NewFwdID },
+    steve_conn:esend( friends, NewMsg, [ExcludedFriend] ).
 
 %% @hidden
 %% @doc Handle a query and respond.
@@ -243,10 +256,38 @@ run_query( {cid, CID}, #steve_state{db=DB} ) ->
 run_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
 %% @hidden
-%% @doc Handles the Peer API, all other PAPIM types are not messages expected
-%%   from other peers.
+%% @doc Checks if the message is a repeat and discards if yes, otherwise it will
+%%   verify it's not a forwarded message coming back. If it was, then we should
+%%   forward it back to the person in our forward table. If its a normal message
+%%   process it.
 %% @end
-handle_papim( ?PAPI_COMPREQ, Cnt, _Val, #steve_state{caps=Cap} = _State ) -> 
+handle_papim( Type, Friend, Fwd, Cnt, Val, State ) ->
+    MsgHash = steve_util:hash( {Type, Cnt, Val} ),
+    case steve_db:check_mark_seen( MsgHash ) of
+        true -> ok; % We already saw this message. DISCARD.
+        false -> % New message, lookup if this is a reply to a forwarded message
+            spawn(?MODULE, proc_check, [Type, Friend, Fwd, Cnt, Val, State])
+    end.
+
+%% @hidden
+%% @doc If the message is forwarded, handle sending it back, otherwise process.
+proc_check( Type, Friend, Fwd, Cnt, Val, State ) ->
+    case state_db:lookup_mask(Fwd) of
+        {FriendID, FwdID} -> % Its just a forward, so send it back.
+            NewMsg = #papim{from=FwdID, type=Type, cnt=Cnt, val=Val},
+            steve_conn:send( friends, FriendID, NewMsg );
+        false -> % It's a new message, so handle it:
+            (case handle_papim_type( Type, Cnt, Val, State ) of
+                noreply -> ok;
+                {reply, Value} -> steve_conn:send( friends, Friend, Value );
+                {broadcast, Value} -> broadcast( Value );
+                {forward, Value} -> forward( Friend, Value )
+            end)
+    end.
+
+%% @hidden
+%% @doc Run the handling logic per type of message it is.
+handle_papim_type( ?PAPI_COMPREQ, Cnt, _Val, #steve_state{caps=Cap} = _State ) -> 
    case requests:match( Cap, Cnt ) of
        {ok, nomatch} -> 
            ok; %TODO: no match, so broadcast to all friends except sender.
@@ -258,42 +299,42 @@ handle_papim( ?PAPI_COMPREQ, Cnt, _Val, #steve_state{caps=Cap} = _State ) ->
                   "Found Bad capability when trying to match: ~p", [Cnt]),
            noreply
     end;
-handle_papim( ?PAPI_COMPACK, Cnt, _Val, State ) ->
+handle_papim_type( ?PAPI_COMPACK, _Cnt, _Val, _State ) ->
     %TODO: check in state if we sent it,
     %   if yes, then update db with new handler. If new friend, connect and 
     %       start transfer for archive.
     %   otherwise, forward it on to the peer that send the req through you.
     ok;
-handle_papim( ?PAPI_RESCAST, Cnt, _Val, State ) -> 
+handle_papim_type( ?PAPI_RESCAST, _Cnt, _Val, _State ) -> 
     %TODO: Check if we have the result stored,
     %   if yes, then discard.
     %   otherwise, save and perpetuate broadcast.
     ok;
-handle_papim( ?PAPI_RESREQ, Cnt, _Val, State ) ->
+handle_papim_type( ?PAPI_RESREQ, _Cnt, _Val, _State ) ->
     %TODO: Check if we have the results stored,
     %   if yes, then send peer directly a RESCAST message for each ID
     %   otherwise,
     %       if we've heard of ID before, perpetuate RESREQ message onward
     %       otherwise, discard.
     ok;
-handle_papim( ?PAPI_REPCHK, Cnt, _Val, State ) -> 
+handle_papim_type( ?PAPI_REPCHK, _Cnt, _Val, _State ) -> 
     %TODO: If we have a reputation for this individual, send back REPACK.
     %   Otherwise we replace from field with self and save maping and broadcast
     %       to others. 
     ok;
-handle_papim( ?PAPI_REPACK, Cnt, _Val, State ) -> 
+handle_papim_type( ?PAPI_REPACK, _Cnt, _Val, _State ) -> 
     %TODO: Did we send the REPCHK?
     %   if yes, then augment our rep with the new rep ack
     %   otherwise, wrap with our rep
     ok;
-handle_papim( ?PAPI_FRNDREQ, Cnt, _Val, State ) -> 
+handle_papim_type( ?PAPI_FRNDREQ, _Cnt, _Val, _State ) -> 
     %TODO: Grab top half of peers based on reputation and filter by
     %   Cnt, which is a list of already known peers. Fwd FRNDREQ to them.
     %   Send FRNDACK if you are not on the ignore list. If there are any 
     %   unrecognized values in Cnt List, we may want to send a Frndreq
     %   of our own if we are in a starved state
     ok;
-handle_papim( ?PAPI_FRNDACK, Cnt, _Val, State ) -> 
+handle_papim_type( ?PAPI_FRNDACK, _Cnt, _Val, _State ) -> 
     %%TODO: Did we send a FRNDREQ?
     %%  if yes, then potentially add FRND to peer's list. 
     ok.

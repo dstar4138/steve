@@ -17,6 +17,7 @@
 
 % The Internal message representation.
 -record(papim, {
+          from = nil :: tuple(), % {Friend ID, Message ID they Gave }
           type      :: papi_msg_code(), 
           cnt = nil :: papi_cnt(),
           val = nil :: papi_val()

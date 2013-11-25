@@ -217,6 +217,9 @@ handle_info( {pg_message, _From, ?CLIENT_GROUP, GroupMsg}, StateName,
             ?DEBUG("Sending data to client (~p): ~p", [Cid, Data]),
             ok = send( S, Data ),
             {next_state, StateName, State, ?TIMEOUT};
+        {fwd, Excludes, Data} ->
+            send_after_check( Excludes, Data, State ),
+            {next_state, StateName, State, ?TIMEOUT};
         _ -> % Unknown message
             ?DEBUG("Unknown Group message, ignoring: ~p",[GroupMsg]),
             {next_state, StateName, State, ?TIMEOUT}
@@ -278,4 +281,14 @@ process( Msg , NextState, State = #state{sock=S}) ->
 %%  send calls with an appendage of a new line.
 %% @end
 send( S, << BMsg/binary>> ) -> gen_tcp:send(S, <<BMsg/binary, $\n>>).
+
+%% @hidden
+%% @doc Checks if the current Client ID is in the excludes list before sending.
+send_after_check( Excludes, Data, #state{sock=S, cliID=ID} = _State ) ->
+    case lists:member( ID, Excludes ) of
+        true -> ok;
+        false -> 
+            Encoded = capi:encode( Data ),
+            send( S, Encoded )
+    end.
 

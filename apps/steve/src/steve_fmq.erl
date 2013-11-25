@@ -212,9 +212,11 @@ handle_info( {pg_message, _From, ?FRIEND_GROUP, GroupMsg}, StateName,
             ?DEBUG("MQ got broadcasted shutdown message.", []),
             gen_tcp:close(S),
             {stop, normal, State};
-        {send, Cid, Data} ->
-            ?DEBUG("Sending data to client (~p): ~p", [Cid, Data]),
-            ok = gen_tcp:send( S, Data ),
+        {send, FidOrFriend, Data} ->
+            send_if_check( FidOrFriend, Data, State ),
+            {next_state, StateName, State, ?TIMEOUT};
+        {fwd, Excludes, Data} ->
+            send_after_check( Excludes, Data, State ),
             {next_state, StateName, State, ?TIMEOUT};
         _ -> % Unknown message
             ?DEBUG("Unknown Group message, ignoring: ~p",[GroupMsg]),
@@ -257,9 +259,9 @@ handle_error( Err, _State = #state{sock=S} ) ->
 %% @doc Send message to state server for processing, wait for reply and either
 %% forward over wire or ignore.
 %% @end
-process( Msg , NextState, State = #state{sock=S}) ->
+process( Msg , NextState, State = #state{sock=S, friend=F}) ->
     ?DEBUG("Processing PAPI Message in State server: ~p", [Msg]),
-    case steve_state:process_fmsg( Msg ) of
+    case steve_state:process_fmsg( F, Msg ) of
         {reply, Rep} -> 
             ?DEBUG("State server says to reply with: ~p",[Rep]),
             gen_tcp:send( S, papi:encode(Rep) ),
@@ -274,3 +276,29 @@ process( Msg , NextState, State = #state{sock=S}) ->
 
 get_friends_id( #friend{ name=Name, id=ID } ) -> <<Name,ID/binary>>;
 get_friends_id( ID ) -> ID.
+
+send_after_check( Excludes, Msg, #state{sock=S, friend=F} = _State ) ->
+    case lists:member( F#friend.id, Excludes ) of
+        true -> ok;
+        false -> 
+            Encoded = papi:encode( Msg ),
+            ok = gen_tcp:send( S, Encoded )
+    end.
+
+send_if_check( #friend{id=ID}, Msg, #state{sock=S, friend=F} = _State ) ->
+    case ID =:= F#friend.id of
+        false -> ok;
+        true ->
+            ?DEBUG("Sending data to Friend (~p): ~p", [ID, Msg]),
+            Encoded = papi:encode( Msg ),
+            ok = gen_tcp:send( S, Encoded )
+    end;
+send_if_check( ID, Msg,  #state{sock=S, friend=F} = _State ) ->
+    case ID =:= F#friend.id of
+        false -> ok;
+        true -> 
+            ?DEBUG("Sending data to Friend (~p): ~p", [ID, Msg]),
+            Encoded = papi:encode( Msg ),
+            ok = gen_tcp:send( S, Encoded )
+    end.
+

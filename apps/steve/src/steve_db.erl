@@ -65,11 +65,32 @@
            val :: term()
           }).
 %% ------------------------------------------- %%
--define(TABLE_LIST, [t_me, t_comp, t_friend]).
+%% Message Seen List
+%%      Simple key-value store that Steve will share all recent message hashes
+%%      in. We can then verify that we don't reprocess. THIS NEEDS FAST LOOKUP.
+%%
+-record( t_msg, {
+           hash :: binary(),
+           data :: any() % We will probably need to store misc data about it.
+        }).
+%% ------------------------------------------- %%
+%% Fowarding Table
+%%      Simple key-value store that holds IDs from messages and where to pass
+%%      messages recieved with them to.
+%%
+-record(t_fwd, {
+          id :: binary(),
+          fwd :: {uid(), binary()} % {Friend ID, with FwdID}
+        }).
+%% ------------------------------------------- %%
+-define(TABLE_LIST, [t_me, t_comp, t_multicomp,  t_friend, t_msg, t_fwd]).
 -define(TABLES, [
                  {t_me, record_info(fields, t_me), []},
                  {t_comp, record_info(fields, t_comp), [fid]},
-                 {t_friend, record_info(fields, t_friend), []}
+                 {t_multicomp, record_info(fields, t_multicomp), []},
+                 {t_friend, record_info(fields, t_friend), []},
+                 {t_msg, record_info(fields, t_msg), []},
+                 {t_fwd, record_info(fields, t_fwd), []}
                 ]).
 
 -export( [ verify_install/1 ] ).
@@ -78,6 +99,8 @@
 -export( [ has_handler_result/1, has_all_results/1, 
            get_comp/1, get_missing_result_list/0 ] ).
 -export( [ lookup_friend/1, add_update_friend/1, get_last_addrs/0 ] ).
+-export( [ mark_seen/1, check_seen/1, check_mark_seen/1 ] ).
+-export( [ save_and_mask_msg/2, lookup_mask/1 ] ).
 
 %%% ==========================================================================
 %%% API
@@ -255,6 +278,63 @@ get_last_addrs() ->
                         U <- mnesia:table( t_friend ) ] ) )
     end,
     run_tran( Transaction, [] ).
+
+%% @doc Marks a message hash as being seen and saves some context about the
+%%   current local state.
+%% @end
+mark_seen( Hash ) ->
+   Transaction = fun() ->
+        mnesia:write( #t_msg{ hash = Hash,
+                              data = os:timestamp()%TODO: anything else to save?
+                            })
+   end,
+   run_tran( Transaction, ok ).
+
+%% @doc Checks if a particular hash has been seen recently. If not, it's likely
+%%   that we haven't processed it and should give it a go.
+%% @end
+check_seen( Hash ) ->
+    Transaction = fun() ->
+        0 < lists:length(
+                qlc:e( qlc:q( [ U || U <- mnesia:table(t_msg),
+                                     U#t_msg.hash =:= Hash ])))
+    end,
+    run_tran( Transaction, false ).
+
+
+%% @doc Check if a particular hash has been seen, if it hasen't mark it.
+check_mark_seen( Hash ) ->
+    case check_seen( Hash ) of
+        false -> mark_seen( Hash ), false;
+        true  -> true
+    end.
+
+%% @doc Save a previous mask/friend ID pair and return a new FwdID after saving
+%%   the link in the database.
+%% @end
+save_and_mask_msg( OldFwdID, FriendID ) ->
+    NewFwdID = steve_util:uuid(),
+    Transaction  = fun() ->
+        mnesia:write( #t_fwd{
+                         id = NewFwdID,
+                         fwd = { FriendID, OldFwdID }
+                        })
+    end,
+    run_tran( Transaction, NewFwdID ).
+
+
+%% @doc Lookup if we sent out a particular forwarding ID, if so return the 
+%%   Friend ID and masked FwdID that we saved for sending it back. 
+%% @end  
+lookup_mask( Mask ) ->
+    Transaction = fun() ->
+        qlc:e(qlc:q( [ U#t_fwd.fwd || U <- mnesia:table(t_fwd), 
+                                      U#t_fwd.id =:= Mask ] ))
+    end,
+    case run_tran( Transaction, [] ) of
+        [] -> false;
+        [Fwd|_] -> Fwd
+    end.
 
 
 %%% ==========================================================================
