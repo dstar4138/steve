@@ -1,2 +1,2 @@
 #!/bin/sh
-erl -pa ./apps/steve/ebin ./deps/jsonx/ebin
+erl -pa ./ebin ./deps/jsonx/ebin ./deps/exec/ebin
