@@ -19,6 +19,7 @@ know and he'll pass on the program or code to run. When the friend gets back to
 him he'll forward the report to you.
 
 Features:
+
     - Fault-tolerant: Steve can have a lot of friends, and if more than one 
         friend can work on your code, then you can let them all have a go. Just 
         in case one is a no-show, the other's will still have your back. Also, 
@@ -38,15 +39,15 @@ Features:
 
     - Heterogenous: Steve isn't expecting all friends to be able to do 
         everything, in fact, Steve counts on the fact that he's so connected 
-        that he can get things done for you. In his network of friends, being
-        unique and useful is a good thing.
+        to diverse people, that he can get different things done for you. In 
+        his network of friends, being unique and useful is a good thing.
 
 Faults:
 
     - Trust: Steve only talks to his friends. He's clique'ish like that. To be
-        a part of the group Steve will first ask your opinion of them before
-        ever talking to them. Whitelist first, then rely on reputation later. 
-        This can be a problem, especially if you wanted a dynamic friend-base.
+        a part of the group Steve will first ask other's opinion of you before
+        ever talking to you. Whitelist first, then rely on reputation later. 
+        This can be a problem, especially if a dynamic friend-base is desirable.
 
     - Security: I'm sorry... Steve's a loud mouth. The only real security you 
         have in letting Steve do your dirty work, is that he'll let you tell him
@@ -55,16 +56,25 @@ Faults:
 
   From the feature and fault lists, you can decide if you want to give Steve a 
 try. Check the Building and Deploying sections below. If you think you can 
-change him, send us a pull request and we'll take a look at it. 
+add more features or remove some faults, send us a pull request and we'll take 
+a look at it. 
 
 
 REQUIREMENTS:
 
-  Steve has only been tested on Mac OS X and Debian Linux. The windows platform
-is currently not supported. Steve only needs a few things to get started:
+  The Steve Daemon has only been tested on Mac OS X and Debian Linux. The 
+Windows platform is currently not supported. The Steve Daemon only needs a few 
+things to get started:
     
-    - Erlang (minimum version R15B01)
+    - Erlang VM (minimum version R15B01)
     - libcap-dev (for erlexec package, to monitor OS processes)
+
+  Steve is headless and will need an interface to interact with it. You can use
+the erlang shell, or the following GUI:
+
+    - Steve Client (https://github.com/pdg6868/SteveClient)
+        Uses Xamarin and can be built for several different platforms.
+
 
 BUILDING:
 

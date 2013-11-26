@@ -27,7 +27,7 @@ start( OverrideOptions ) ->
 start() -> application:start(steve).
 
 %% @doc Stop the running steve daemon.
-stop() -> application:stop().
+stop() -> application:stop(steve).
 
 
 %% @doc Add a peer/friend for steve to try and connect to. It will return with

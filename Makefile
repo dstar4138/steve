@@ -7,29 +7,21 @@ REBAR=$(CURDIR)/bin/rebar
 RELDIR=$(CURDIR)/rel
 RELTOOL_CFG=$(CURDIR)/conf/reltool.config
 
-.PHONY: daemon client clean distclean drelease crelease scripts all
+.PHONY: daemon clean distclean drelease scripts all
 
 ## Compile the Daemon code.
 daemon: 
 	$(REBAR) get-deps compile 
 	
-## Compile our Client code.
-client:
-	git submodule init
-	git submodule update
-	cd apps/SteveClient; make
-
 test: daemon
 	$(REBAR) eunit
 
 ## Superficial clean of workspace
 clean:
 	$(REBAR) clean
-	cd apps/SteveClient; make clean
 
 ## Total whipe of all releases and generated scripts.
 distclean: clean
-	-rm -rf apps/SteveClient
 	-rm bin/steve.sh
 	-rm -rf rel
 
@@ -40,13 +32,6 @@ drelease: daemon
 	cp $(RELTOOL_CFG) $(RELDIR)
 	$(REBAR) generate
 
-## Build the client release. ##TODO: push client release code to rel/client/.
-crelease: client
-	-mkdir -p $(RELDIR)/client
-	#cd apps/SteveClient; make release
-	@echo "_WARNING_: COULDNT COPY CLIENT REL"
-
-
 ## Ease-of-Use scripts for quick launching and linking to.
 scripts:
 	touch bin/steve.sh
@@ -55,5 +40,5 @@ scripts:
 	chmod +x bin/steve.sh
 
 ## Make everything including the scripts.
-all: drelease crelease scripts
+all: drelease scripts
 
