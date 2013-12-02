@@ -8,7 +8,8 @@
 % We want a proplist back rather than a stuct or eep18.
 -define(JSONX_OPTIONS, [{format,proplist}]).
 
--export([uuid/0, valid_uuid/1, uuid_to_str/1, str_to_uuid/1, bits_to_uuid/1]).
+-export([uuid/0, valid_uuid/1, uuid_to_str/1, 
+         str_to_uuid/1, bits_to_uuid/1, uuid_compare/2]).
 -export([hash/1]).
 -export([loadrc/1, readfile/1, clean_path/1]).
 -export([encode_json/1, decode_json/1]).
@@ -52,6 +53,29 @@ valid_uuid( UID ) when is_binary( UID ) ->
         <<_:48,4:4,_:12,2:2,_:62>> -> true;
         _ -> false
     end.
+
+%% @doc Compares two UUIDs, which can be of any form (string, binary).
+-spec uuid_compare( any(), any() ) -> boolean().
+uuid_compare( String, Any ) when is_list( String ) -> 
+    try 
+        Bin = str_to_uuid( String ),
+        uuid_compare( Bin, Any )
+    catch _:_ -> false end;
+uuid_compare( Bin, String ) when is_binary( Bin ) andalso is_list( String ) ->
+    try
+        Bin2 = str_to_uuid( String ),
+        uuid_compare( Bin, Bin2 )
+    catch _:_ -> false end;
+uuid_compare( Bin1, Bin2 ) when is_binary( Bin1 ) andalso is_binary( Bin2 ) ->
+    case valid_uuid( Bin1 ) of
+        true -> (case valid_uuid( Bin2 ) of
+                     true -> (Bin1 =:= Bin2);
+                     false -> false
+                 end);
+        false -> false
+    end;
+uuid_compare( _, _ ) -> false.
+
 
 %% @doc Hashes using the erlang's built in portable hashing function. We 
 %% introduce the arbitrary requirement that the parameter is binary so we 

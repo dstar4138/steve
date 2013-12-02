@@ -20,12 +20,16 @@
 %%      Result        - whether this current node has heard about a result.
 %%      HasResArchive - whether this computation will require a result archive.
 %%      ArchiveHash   - A Hash of the archive, used for checksums.
+%%      Foreign       - False if local node made request, True if otherwise.
+%%      Value         - Each request has a value, stored here or in an archive.
 -record( t_comp, {
            id                   :: uid(),
            fid                  :: uid(),
            result = false       :: boolean(),
            has_resarchive = nil :: nil | boolean(),
-           archive_hash = nil   :: nil | integer() 
+           archive_hash = nil   :: nil | integer(),
+           foreign = false      :: boolean(),
+           value = nil          :: nil | any()  
           }).
 %% ------------------------------------------- %%
 %% Local-Computation-ID-Lookup-Table:
@@ -95,6 +99,7 @@
 
 -export( [ verify_install/1 ] ).
 -export( [ set_state_key/2, get_state_key/1 ] ).
+-export( [ check_result/2 ] ).
 -export( [ add_new_computation/1, add_comp_handler/2 ]). 
 -export( [ has_handler_result/1, has_all_results/1, 
            get_comp/1, get_missing_result_list/0 ] ).
@@ -130,6 +135,21 @@ get_state_key( Key ) when is_atom( Key ) ->
     end,
     run_tran( Transaction, ok ).
 
+
+%% @doc Checks if a result has been stored, but also finished.
+check_result( HashId, ResultReport ) ->
+    NewTComp = build_tcomp_from_report( HashId, ResultReport ),
+    Transaction = fun() ->
+        case qlc:e( qlc:q( [ C || C <- mnesia:table(t_comp), 
+                                  C#t_comp.id =:= HashId ] ) )
+        of
+            [] ->
+               mnesia:write( NewTComp ),
+               false;
+            _ -> true
+        end
+    end,
+    run_tran( Transaction, false ).
 
 %% @doc Adds a new computation, created by the client. This needs to be called
 %%   before calling add_comp_handler/2, to signal that a friend was accepted to
@@ -326,6 +346,7 @@ save_and_mask_msg( OldFwdID, FriendID ) ->
 %% @doc Lookup if we sent out a particular forwarding ID, if so return the 
 %%   Friend ID and masked FwdID that we saved for sending it back. 
 %% @end  
+lookup_mask( nil ) -> false;
 lookup_mask( Mask ) ->
     Transaction = fun() ->
         qlc:e(qlc:q( [ U#t_fwd.fwd || U <- mnesia:table(t_fwd), 
@@ -340,6 +361,21 @@ lookup_mask( Mask ) ->
 %%% ==========================================================================
 %%% Private Functionality
 %%% ========================================================================== 
+
+%% @hidden 
+%% @doc Creates a t_comp record using the result record pulled from the PAPI
+%%   message we received, broadcasting the Result for the particular 
+%%   computation, HashId.
+%% @end
+build_tcomp_from_report( HashId, ResultReport ) ->
+    Cid =  papi:rr_fid(ResultReport),
+    Foreign = (not steve_util:uuid_compare( Cid, get_state_key( my_id ) )), 
+    #t_comp{ id = HashId,
+             fid = Cid,
+             result = true,
+             has_resarchive = papi:rr_archived(ResultReport),
+             foreign = Foreign,
+             value = papi:rr_value(ResultReport) }.
 
 %% @hidden
 %% @doc Pushes the current progress from CIDs into the Computation object.

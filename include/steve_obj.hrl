@@ -43,7 +43,9 @@
         % Do we have the results saved locally?
         has_result_locally = false :: boolean(),
         % Which Friends are working on it?
-        friends_computing = [] :: [ binary() ] %[ UUID() ]
+        friends_computing = [] :: [ binary() ], %[ UUID() ]
+        % The Value of the computation, if it can be expressed as such.
+        value = nil                :: nil | any()
         } ).
 -type 'COMPUTATION'() :: #computation{}.
 -define(COMPUTATION(Id,Archive,Hash,Req), 

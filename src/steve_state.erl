@@ -4,7 +4,7 @@
 %% @author Alexander Dean
 -module(steve_state).
 -behaviour(gen_server).
--compile(export_all).
+-compile(export_all). %XXX: Remove after testing!
 
 -include("debug.hrl").
 -include("steve_obj.hrl").
@@ -26,7 +26,11 @@
          terminate/2,
          code_change/3]).
 
--record(steve_state, { reqs, caps, db }).
+-record(steve_state, { reqs, caps, db,
+                        % Temporary State maintained:
+                        cap_store = [], % ReqHash -> Capability Action store.
+                        out_req   = []  % ReqHash -> Outstanding Requests.
+                        }).
 
 %%%===================================================================
 %%% API
@@ -65,6 +69,13 @@ process_cmsg( Msg ) -> gen_server:call( ?MODULE, {cmsg, Msg} ).
 %% @end
 process_fmsg( F, Msg ) -> gen_server:call( ?MODULE, {fmsg, F, Msg} ).
 
+%% @hidden
+%% @doc Internal cast to ask for a state save update. Comes typically from a 
+%%   separate process handling a PAPI message.
+%% @end
+-spec temp_save( any() ) -> ok.
+temp_save( Msg ) ->
+    gen_server:cast( ?MODULE, {temp_save, Msg} ).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -83,12 +94,9 @@ start_link( StartArgs ) ->
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} 
-%% @end
+%% @doc Initializes the server
 %%--------------------------------------------------------------------
+-spec init( list() ) -> {ok, #steve_state{}}.
 init( StartArgs ) ->
     ?DEBUG("Got Args: ~p~n",[StartArgs]),
     process_flag(trap_exit, true),
@@ -136,20 +144,16 @@ handle_call({fmsg, Friend, Msg}, _From, State) ->
     handle_papim( Friend, Msg, State ),
     {reply, ok, State};
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(_Request, _From, State) -> {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @spec handle_cast(Msg, State) -> {noreply, State} |
-%%                                  {noreply, State, Timeout} |
-%%                                  {stop, Reason, State}
-%% @end
+%% @doc Handles casted messages from spawned processes.
 %%--------------------------------------------------------------------
+-spec handle_cast( any(), #steve_state{} ) -> {noreply, #steve_state{}}.
+handle_cast( {temp_save, Msg}, State ) ->
+    NewState = update_state( Msg, State ),
+    {noreply, NewState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -157,6 +161,7 @@ handle_cast(_Msg, State) ->
 %% @private
 %% @doc Handling all non call/cast messages. Unused.
 %%--------------------------------------------------------------------
+-spec handle_info( any(), #steve_state{} ) -> {noreply, #steve_state{}}.
 handle_info(_Info, State) -> {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -272,7 +277,7 @@ handle_papim( Friend, Msg, State ) ->
     case steve_db:check_mark_seen( MsgHash ) of
         true -> ok; % We already saw this message. DISCARD.
         false -> % New message, lookup if this is a reply to a forwarded message
-            spawn(?MODULE, proc_check, [Friend, Msg,  State])
+            spawn(?MODULE, proc_check, [Friend, Msg, State])
     end.
 
 %% @hidden
@@ -299,35 +304,67 @@ handle_papim_type( #papim{type=?PAPI_COMPREQ, cnt=Cnt} = Msg,
        {ok, nomatch} -> % No match, so forward to all friends except sender.
            {forward, Msg};
        {ok, Cap} -> % Capable, so send back ack. and save reqdef hash for ref
+           Hash = Msg#papim.val,
            NewAck = #papim{ from=Msg#papim.from,
-                            type=?PAPI_COMPACK
-                            %TODO: what else needs to be here? the hash or an ID?
+                            type=?PAPI_COMPACK,
+                            cnt=Hash, %TODO: copy/pastes supposed HASH, 
+                                      % we should really calculate it 
+                                      % ourselves and send. The real
+                                      % sender will know it's for them,
+                                      % don't want someone disabling
+                                      % someone's requesting ability
+                                      % by substituting hashes.      
+                            val=my_contact_info()
                           },
-           %TODO: Save the Cap and Hash of Msg for if we get accepted (steve_db)
+           steve_state:temp_save( {cap_req, Hash, Cap} ),
            {reply, NewAck};
        {error, badcaps} -> 
            ?ERROR("steve_state:handle_papim",
                   "Found Bad capability when trying to match: ~p", [Cnt]),
            noreply
     end;
-handle_papim_type( #papim{type=?PAPI_COMPACK}, _State ) ->
-    %TODO: check in state if we sent it,
-    %   if yes, then update db with new handler. If new friend, connect and 
-    %       start transfer for archive.
-    %   otherwise, forward it on to the peer that send the req through you.
-    ok;
-handle_papim_type( #papim{type=?PAPI_RESCAST}, _State ) -> 
-    %TODO: Check if we have the result stored,
+handle_papim_type( #papim{type=?PAPI_COMPACK, 
+                          from=nil,  % Only even look up if we own the request.
+                          cnt=Hash,val=Conn}, 
+                   #steve_state{ out_req=Outs } ) ->
+    case lists:keysearch( Hash, 1, Outs ) of
+        false -> noreply; % Discard, we don't remember request.
+        {Hash, Req} ->  %Push computation passing to new proc and send noreply
+            spawn( fun() -> ask_friends_help(Conn, Req) end ),
+            noreply
+    end;
+handle_papim_type( #papim{type=?PAPI_RESCAST, cnt=Hash, val=ResReport} = Msg, 
+                   _State ) -> 
+    %   Check if we have the result stored,
     %   if yes, then discard.
     %   otherwise, save and perpetuate broadcast.
-    ok;
-handle_papim_type( #papim{type=?PAPI_RESREQ}, _State ) ->
-    %TODO: Check if we have the results stored,
+    case steve_db:check_result( Hash, ResReport ) of
+        true -> % We have the result, so ignore.
+            noreply;
+        false -> % We did not have the result, so start a process to get it
+                 % and forward the broadcast on.
+            steve_state:start_result_grab( ResReport ),
+            {broadcast, Msg}
+    end;
+handle_papim_type( #papim{type=?PAPI_RESREQ, cnt=IDs} = Msg, 
+                   _State ) ->
+    %   Check if we have the results stored,
     %   if yes, then send peer directly a RESCAST message for each ID
     %   otherwise,
     %       if we've heard of ID before, perpetuate RESREQ message onward
     %       otherwise, discard.
-    ok;
+    {Done, Missing} = steve_state:check_result_state( IDs ),
+    F = fun(D) -> case steve_state:build_rescast(D) of
+                      {error, _Reason} -> noreply;
+                      {ok, Comp} -> {reply, Comp}
+                  end 
+         end,
+    Replys = lists:map( F, Done ),
+    Fwd = case Missing of 
+        [] -> [];
+        _  ->[{forward, Msg#papim{cnt=Missing}}]
+    end,
+    Fwd++Replys; % Sends back a list of messages.
 handle_papim_type( #papim{type=?PAPI_REPCHK}, _State ) -> 
     %TODO: If we have a reputation for this individual, send back REPACK.
     %   Otherwise we replace from field with self and save maping and broadcast
@@ -350,4 +387,60 @@ handle_papim_type( #papim{type=?PAPI_FRNDACK}, _State ) ->
     %%  if yes, then potentially add FRND to peer's list. 
     ok.
 
+%% @hidden
+%% @doc Gets the contact information for the current system.
+my_contact_info( ) ->
+    {IP, Port} = steve_conn:friend_conn_info(),
+    BIP = list_to_binary(IP),
+    CID = case steve_db:get_state_key( my_id ) of
+              {my_id, Bcid} -> Bcid;
+              _ -> null %TODO: This is an error state. This is bad.
+          end,
+    %% The following must be valid JSON for message sending.
+    papi:create_ci( BIP, Port, CID ).
 
+
+update_state( {cap_req, Hash, Cap}, #steve_state{ cap_store=C } = State ) ->
+    State#steve_state{ cap_store=[{Hash,Cap}|C] };
+update_state( Unknown, State ) ->
+    ?DEBUG("Unknown state update message: ~p",[Unknown]),
+    State.
+
+ask_friends_help( _ConnData, _Request ) ->
+    %   Update db with new handler. If new friend, connect and 
+    %       start transfer for archive.
+    %   otherwise, forward it on to the peer that send the req through you.
+    ok. %TODO: implement sending connection request to new friend, or computation to friend.
+
+start_result_grab( _ResReport ) -> 
+    % TODO: Spawn a process to start copying data from FID to local store,
+    %  then update the db with hash of archive.
+    ok.
+
+%% @hidden
+%% @doc Loops over the list of IDs from a Result Request, and checks if
+%%   we have the result for that particular computation.
+%% @end
+check_result_state( L ) -> check_result_state( L, [], [] ).
+check_result_state( [], Done, Missing ) -> {Done, Missing};
+check_result_state( [H|R], Done, Missing ) ->
+    case steve_db:has_handler_result(H) of
+        true -> check_result_state( R, [H|Done], Missing );
+        false -> check_result_state( R, Done, [H|Missing] )
+    end.
+
+%% @hidden
+%% @doc Creates a Result Cast message using just the ID of the result. It looks
+%%   up all data from the database.
+%% @end
+build_rescast( ID ) -> 
+   case steve_db:get_comp( ID ) of 
+       {error, Reason} -> {error, Reason};
+       C -> 
+           ContactInfo = my_contact_info(),
+           FID = papi:ci_fid(ContactInfo),
+           ResultReport = papi:create_rr( ContactInfo, 
+                                          C#computation.value,
+                                          C#computation.has_archive ),
+           #papim{from=FID, type=?PAPI_RESCAST, cnt=ID, val=ResultReport}
+    end.

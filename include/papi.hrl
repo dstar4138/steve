@@ -15,13 +15,17 @@
 % The value is nil for all messages besides RESCAST amd REPACK.
 -type papi_val() :: nil | boolean().
 
+% Whether or not the message was forwarded.
+-type papi_fwd() :: nil | binary(). %UUID
+
+
 % The Internal message representation.
 -record(papim, {
-          from = nil :: tuple(), % {Friend ID, Message ID they Gave }
-          hops = 2  :: integer(),
-          type      :: papi_msg_code(), 
-          cnt = nil :: papi_cnt(),
-          val = nil :: papi_val()
+          from = nil :: papi_fwd(),
+          hops = 2   :: integer(),
+          type       :: papi_msg_code(), 
+          cnt = nil  :: papi_cnt(),
+          val = nil  :: papi_val()
 }).
 
 % Message constructors.

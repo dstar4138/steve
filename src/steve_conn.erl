@@ -30,6 +30,7 @@
 -export([get_friend_count/0, get_client_count/0, check_mq_group/1]).
 -export([get_friend_list/0, get_client_list/0]).
 -export([esend/3, send/3]).
+-export([friend_conn_info/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -45,6 +46,11 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc Ask the running friends conn server what the connection details are.
+-spec friend_conn_info() -> tuple(). %TODO: better define type.
+friend_conn_info() ->
+    gen_server:call( ?MOD( friends ), get_conn ). 
 
 %% @doc Send a message to a particular group member.
 -spec send( atom(), any(), any() ) -> ok.
@@ -145,8 +151,12 @@ init([Group, MqMod, Port]) ->
 %% @private
 %% @doc Handling call messages, currently unused.
 %%--------------------------------------------------------------------
+handle_call( get_conn, _From, #state{ port=Port } = State ) ->
+    {ok, IP} = get_ip(),
+    {reply, {IP, Port}, State};
 handle_call( Request, From, State) -> 
-    ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p",[Request, From, State]),
+    ?DEBUG("Conn server should not be getting calls (~p, ~p): ~p", 
+           [Request, From, State]),
     {stop, badarg, State}.
 
 %%--------------------------------------------------------------------
@@ -267,3 +277,28 @@ set_sockopt( ListSock, CliSocket ) ->
             end;
         Error -> gen_tcp:close(CliSocket), Error
     end.
+
+%% @hidden
+%% @doc Get the IP of the local daemon instance. For this daemon to communicate
+%%   outside of a private network, it's 'global_ip' configuration option will 
+%%   need to be overridden in the configuration file. Otherwise it will just
+%%   grab the local IP given to it by the router.
+%% @end
+get_ip() ->
+    Check = case application:get_env( steve, global_ip ) of
+        {ok, IPString} -> 
+            (case inet:parse_address( IPString ) of
+                 {ok, _} -> {ok, IPString};
+                 _ -> error
+             end);
+        undefined -> error
+    end,
+    case Check of
+        error -> 
+            {ok, IPs} = inet:getif(),
+            IP = element( 1, hd(IPs) ),
+            IPS = io_lib:format( "~w.~w.~w.~w", tuple_to_list(IP) ),
+            {ok, lists:flatten(IPS)};
+        _ -> {ok, "127.0.0.1"} % Default return localhost.
+    end.
+ 
