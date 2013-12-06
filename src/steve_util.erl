@@ -14,6 +14,7 @@
 -export([loadrc/1, readfile/1, clean_path/1]).
 -export([encode_json/1, decode_json/1]).
 -export([getrootdir/0]).
+-export([tobin/2, tostr/1, trim/1]).
 
 %% @doc Follows RFC4122 for generating UUIDs version 4 via Random Numbers. 
 %% This function will perform fairly slowly as it uses the crypto module,
@@ -141,4 +142,16 @@ tilde_expand( Path ) -> Path.
 %% @doc Converts a string into binary by eatting two chars per loop.
 tobin( [], A )-> erlang:list_to_binary(lists:reverse(A));
 tobin( [X,Y|R], A )-> {ok,[B],_}=io_lib:fread("~16u", [X,Y]), tobin(R,[B|A]).
+
+%% @hidden
+%% @doc Converts anything into a string for comparisons, etc.
+tostr( A ) when is_atom(A) -> erlang:atom_to_list( A );
+tostr( B ) when is_binary(B) -> erlang:binary_to_list( B );
+tostr( I ) when is_integer(I) -> erlang:integer_to_list( I );
+tostr( S ) when is_list(S) -> S;
+tostr( _ ) -> "".
+
+%% @hidden
+%% @doc Trims the whitespace and newlines off a string.
+trim( Subject ) -> re:replace( Subject, "\\s+", "", [global, {return, list}] ).
 

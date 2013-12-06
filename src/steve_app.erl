@@ -30,6 +30,8 @@
 %% @end
 %%--------------------------------------------------------------------
 start(_StartType, StartArgs) ->
+    ?DEBUG("Checking user starting Steve..,", []),
+    ok = check_user(),
     ?DEBUG("Starting Inets service for TFTP...",[]),
     {ok, _Pid} = startup_inets(),
     ?DEBUG("Starting Local persistant storage service...",[]),
@@ -86,3 +88,24 @@ startup_mnesia() ->
               end,
     steve_db:verify_install(SaveDir). % Will start Mnesia daemon if not running.
 
+%% @hidden
+%% @doc Checks to make sure the proper user is running Steve and verifies that
+%%   we definitely aren't root.
+%% @end
+check_user() -> 
+    WhoAmI = steve_util:trim( os:cmd("whoami") ),
+    case application:get_env( steve, user ) of
+        {ok, User} ->
+            S = steve_util:tostr(User),
+            if S == WhoAmI -> ok;
+               true ->
+                  ?ERROR("steve:check_user","Not running as ~p!",[User]),
+                  {error, baduser}
+            end;
+        undefined -> 
+            if WhoAmI == "root" -> 
+                  ?ERROR("steve:check_user","DO NOT RUN AS ROOT!",[]),
+                  {error, baduser};
+               true -> ok
+            end
+    end.

@@ -13,6 +13,12 @@
             % Override Database location
             %{db_loc, "~/.config/steve/db"}, %Default
 
+            % Require a particular user account to run Steve, this is good
+            % for security reasons. But as long as the following is commented 
+            % out it will run as whoever starts it. But Steve WILL NOT RUN AS 
+            % ROOT and shouldn't be expected to by default.
+            %{user, steve},
+
             % Override Local FTP configuration (for result/computation storage)
             %{tftp, [
             %    {port, 0},      % Defaults to picking random open port
