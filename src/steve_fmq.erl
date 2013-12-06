@@ -14,6 +14,7 @@
 -include("steve_obj.hrl").
 
 %% API
+-export([create/3]).
 -export([start_link/0]).
 -export([set_socket/3, send_to_friend/2]).
 -export([get_conn_details/1]).
@@ -46,6 +47,20 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc Hand creates an FMQ connection, used when we want to connect
+%%   to a new unknown peer we heard about in a PAPIM. This
+%%   parallel's steve_fmq_sup:start_mq/3 but doesn't add it to the
+%%   supervisor.
+%% @end
+%%--------------------------------------------------------------------
+create( Group, FriendObj, Socket) ->
+    {ok, Pid} = start_link(),
+    ok = set_socket( Pid, FriendObj, Socket),
+    ok = gen_tcp:controlling_process( Socket, Pid ),
+    pg:join( Group, Pid ),
+    Pid.
 
 %%--------------------------------------------------------------------
 %% @doc Gets the connection details from the finite state machine.
