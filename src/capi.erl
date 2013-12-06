@@ -14,6 +14,8 @@
 -export([parse/1]).
 -export([encode/1]).
 
+-export([gen_req_def/1]).
+
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
 %% message record.
 %% @end
@@ -102,3 +104,42 @@ build_comp( Cnt, Sock ) when is_list( Cnt ) -> {ok, ?CAPI_COMP( Cnt, Sock ) };
 build_comp( Cnt, _ ) -> 
     ?DEBUG("Bad Comp Request, 'cnt' must be proplist: ~p~n",[Cnt]),
     {error, invalid_msg}.
+
+
+%%% ==========================================================================
+%%% Exclusive steve_state API
+%%% ==========================================================================
+
+%% @hidden
+%% @doc Generates a json compatible reqstruct for sending to clients.
+gen_req_def( {requests, ReqStrctList} ) -> gen_req_def( ReqStrctList, [] ).
+gen_req_def( [], A ) -> A;
+gen_req_def( [{Name,required,Value}|Rest], A ) ->
+    Dat = [ {<<"name">>, b(Name)},
+            {<<"required">>, true},
+            {<<"val">>, gen_req_def_val( Value )} ],
+    gen_req_def( Rest, [Dat|A] );
+gen_req_def( [{Name, Value}|Rest], A ) ->
+    Dat =  [ {<<"name">>, b(Name)},
+             {<<"required">>, false},
+             {<<"val">>, gen_req_def_val( Value )} ],
+    gen_req_def( Rest, [Dat|A] ).
+gen_req_def_val( Key )     when is_atom(Key) -> [{<<"key">>, b( Key )}];
+gen_req_def_val( Binary )  when is_binary( Binary ) -> Binary;
+gen_req_def_val( Tuple )   when is_tuple( Tuple ) ->
+    lists:map( fun({Name,Val}) -> { b(Name), gen_req_def_val( Val )} end,
+               erlang:tuple_to_list( Tuple ) );
+gen_req_def_val( List=[H|_] )   when is_list( List ) ->
+    case is_list(H) orelse is_tuple(H) orelse is_binary(H) of
+        true -> % Then its a list of values
+            lists:map( fun gen_req_def_val/1, List );
+        false -> % Then its a string
+            b( List )
+    end.
+
+%% @hidden
+%% @doc Convert a value to binary.
+b( N ) when is_binary( N ) -> N;
+b( N ) when is_list( N ) -> erlang:list_to_binary( N );
+b( N ) when is_atom( N ) -> erlang:atom_to_binary( N, unicode ).
+

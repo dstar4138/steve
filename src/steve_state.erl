@@ -26,7 +26,8 @@
          terminate/2,
          code_change/3]).
 
--record(steve_state, { reqs, caps, db,
+-record(steve_state, {  id, contact,
+                        reqs, caps, db,
                         % Temporary State maintained:
                         cap_store = [], % ReqHash -> Capability Action store.
                         out_req   = []  % ReqHash -> Outstanding Requests.
@@ -101,7 +102,7 @@ init( StartArgs ) ->
     ?DEBUG("Got Args: ~p~n",[StartArgs]),
     process_flag(trap_exit, true),
     State = parse_args(StartArgs, #steve_state{}),
-    broadcast( update ),
+    check_for_updates(),
     {ok, State}.
 
 %%--------------------------------------------------------------------
@@ -125,7 +126,7 @@ handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
 
 handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) ->
     CID = steve_util:uuid(), % Generate new Computation ID.
-    broadcast( {comp_req, Id, CID, Cnt} ), % Broadcast client has new comp-request
+    broadcast_compeq( Id, CID, Cnt ), % Broadcast client has new comp-request
     if Files -> % If Client has files to send over, open a connection and inform
             case steve_ftp:get_conn_port() of
                 {error, Reason} ->
@@ -187,56 +188,24 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 %% @hidden
 %% @doc Parses the incoming arguments.
-parse_args( [], State) -> State;
+parse_args( [], State) -> 
+    ContactInfo = my_contact_info(),
+    FID = papi:ci_fid(ContactInfo),
+    State#steve_state{id=FID,contact=ContactInfo}; 
 parse_args( [{rcfile, Cnt}|Rest], State ) ->
     {[Requests,CapList],_} = proplists:split(Cnt, [requests, capability]),
     RequestStruct = hd(Requests), %LATER: warn user that only the first is considered.
     {ok, CapStruct} = requests:build(RequestStruct, CapList),
-    JsonStyleReqStruct = gen_req_def( RequestStruct ),
+    JsonStyleReqStruct = capi:gen_req_def( RequestStruct ),
     NewState = State#steve_state{reqs=JsonStyleReqStruct, caps=CapStruct},
     parse_args( Rest, NewState );
 parse_args( [_|R], S ) -> parse_args(R,S). %TODO: Any other Args?
-
-%% @hidden
-%% @doc Generates a json compatible reqstruct for sending to clients.
-gen_req_def( {requests, ReqStrctList} ) -> gen_req_def( ReqStrctList, [] ).
-gen_req_def( [], A ) -> A;
-gen_req_def( [{Name,required,Value}|Rest], A ) ->
-    Dat = [ {<<"name">>, b(Name)},
-            {<<"required">>, true},
-            {<<"val">>, gen_req_def_val( Value )} ],
-    gen_req_def( Rest, [Dat|A] );
-gen_req_def( [{Name, Value}|Rest], A ) ->
-    Dat =  [ {<<"name">>, b(Name)},
-             {<<"required">>, false},
-             {<<"val">>, gen_req_def_val( Value )} ],
-    gen_req_def( Rest, [Dat|A] ).
-gen_req_def_val( Key )     when is_atom(Key) -> [{<<"key">>, b( Key )}];
-gen_req_def_val( Binary )  when is_binary( Binary ) -> Binary;
-gen_req_def_val( Tuple )   when is_tuple( Tuple ) ->
-    lists:map( fun({Name,Val}) -> { b(Name), gen_req_def_val( Val )} end,
-               erlang:tuple_to_list( Tuple ) );
-gen_req_def_val( List=[H|_] )   when is_list( List ) ->
-    case is_list(H) orelse is_tuple(H) orelse is_binary(H) of
-        true -> % Then its a list of values
-            lists:map( fun gen_req_def_val/1, List );
-        false -> % Then its a string
-            b( List )
-    end.
-
-%% @hidden
-%% @doc Convert a value to binary.
-b( N ) when is_binary( N ) -> N;
-b( N ) when is_list( N ) -> erlang:list_to_binary( N );
-b( N ) when is_atom( N ) -> erlang:atom_to_binary( N, unicode ).
-
 
 %%% Messaging Handlers
 
 %% @hidden
 %% @doc Broadcast a message to ALL friends/peers. To limit who to not send to
 %%   use the forward/2 function.
-%%         Accepted Messages: update | {comp_req, ID, CID, Cnt}
 %% @end        
 broadcast( Msg ) -> 
     Friends = steve_conn:check_mq_group( friends ),
@@ -256,7 +225,6 @@ forward( ExcludedFriend, Msg ) ->
             NewMsg = Msg#papim{ from = NewFwdID, hops=OldHops-1 },
             steve_conn:esend( friends, NewMsg, [ExcludedFriend] )
     end.
-
 
 %% @hidden
 %% @doc Handle a query and respond.
@@ -282,24 +250,36 @@ handle_papim( Friend, Msg, State ) ->
 
 %% @hidden
 %% @doc If the message is forwarded, handle sending it back, otherwise process.
-proc_check( Friend, #papim{from=Fwd} = Msg, State ) ->
+proc_check( Friend, #papim{from=Fwd} = Msg, #steve_state{id=MyID} = State ) ->
     case state_db:lookup_mask(Fwd) of
         {FriendID, FwdID} -> % Its just a forward, so send it back.
             NewMsg = Msg#papim{from=FwdID},
             steve_conn:send( friends, FriendID, NewMsg );
         false -> % It's a new message, so handle it:
-            (case handle_papim_type( Msg, State ) of
-                noreply -> ok;
-                {reply, Value} -> steve_conn:send( friends, Friend, Value );
-                {broadcast, Value} -> broadcast( Value );
-                {forward, Value} -> forward( Friend, Value )
-            end)
+            Res = handle_papim_type( Msg, State ),
+ 
+            % If we are who sent the message, that means it came on
+            % loopback. We would have therefore already have broadcasted
+            % or forwarded. We can safely ignore the result of processing.
+            if Friend == MyID -> pass; 
+               is_list( Res ) ->
+                   lists:map(fun(M)->process_msg(M,Friend) end, Res);
+               true -> process_msg(Res, Friend)
+            end
     end.
+process_msg( Res, Friend ) ->
+    case Res of
+        noreply -> ok;
+        {reply, Value} -> steve_conn:send( friends, Friend, Value );
+        {broadcast, Value} -> broadcast( Value );
+        {forward, Value} -> forward( Friend, Value )
+     end.
+
 
 %% @hidden
 %% @doc Run the handling logic per type of message it is.
 handle_papim_type( #papim{type=?PAPI_COMPREQ, cnt=Cnt} = Msg, 
-                   #steve_state{caps=Cap} = _State ) -> 
+                   #steve_state{contact=ContactInfo, caps=Cap} = _State ) -> 
    case requests:match( Cap, Cnt ) of
        {ok, nomatch} -> % No match, so forward to all friends except sender.
            {forward, Msg};
@@ -314,7 +294,7 @@ handle_papim_type( #papim{type=?PAPI_COMPREQ, cnt=Cnt} = Msg,
                                       % don't want someone disabling
                                       % someone's requesting ability
                                       % by substituting hashes.      
-                            val=my_contact_info()
+                            val=ContactInfo
                           },
            steve_state:temp_save( {cap_req, Hash, Cap} ),
            {reply, NewAck};
@@ -347,14 +327,14 @@ handle_papim_type( #papim{type=?PAPI_RESCAST, cnt=Hash, val=ResReport} = Msg,
             {broadcast, Msg}
     end;
 handle_papim_type( #papim{type=?PAPI_RESREQ, cnt=IDs} = Msg, 
-                   _State ) ->
+                   State ) ->
     %   Check if we have the results stored,
     %   if yes, then send peer directly a RESCAST message for each ID
     %   otherwise,
     %       if we've heard of ID before, perpetuate RESREQ message onward
     %       otherwise, discard.
     {Done, Missing} = steve_state:check_result_state( IDs ),
-    F = fun(D) -> case steve_state:build_rescast(D) of
+    F = fun(D) -> case steve_state:build_rescast(D, State) of
                       {error, _Reason} -> noreply;
                       {ok, Comp} -> {reply, Comp}
                   end 
@@ -419,7 +399,8 @@ start_result_grab( _ResReport ) ->
 
 %% @hidden
 %% @doc Loops over the list of IDs from a Result Request, and checks if
-%%   we have the result for that particular computation.
+%%   we have the result for that particular computation. WARNING: This has
+%%   the potential for taking a LONG time.
 %% @end
 check_result_state( L ) -> check_result_state( L, [], [] ).
 check_result_state( [], Done, Missing ) -> {Done, Missing};
@@ -433,14 +414,34 @@ check_result_state( [H|R], Done, Missing ) ->
 %% @doc Creates a Result Cast message using just the ID of the result. It looks
 %%   up all data from the database.
 %% @end
-build_rescast( ID ) -> 
+build_rescast( ID, #steve_state{id=FID,contact=ContactInfo} = _State ) -> 
    case steve_db:get_comp( ID ) of 
        {error, Reason} -> {error, Reason};
        C -> 
-           ContactInfo = my_contact_info(),
-           FID = papi:ci_fid(ContactInfo),
            ResultReport = papi:create_rr( ContactInfo, 
                                           C#computation.value,
                                           C#computation.has_archive ),
            #papim{from=FID, type=?PAPI_RESCAST, cnt=ID, val=ResultReport}
     end.
+
+%% @hidden
+%% @doc The other half of the function above, this will check the local system
+%%    upon startup and broadcast to all connected friends that we are missing
+%%    some results.
+%% @end
+check_for_updates() ->
+    MissingResults = steve_db:get_missing_result_list(),
+    ReqMsg = #papim{ type=?PAPI_RESREQ, 
+                     cnt= lists:map( fun steve_util:uuid_to_str/1, 
+                                     MissingResults ) },
+    broadcast( ReqMsg ).
+
+%% @hidden
+%% @doc Sends out a computation request to all connected friends, and also to
+%%   ourselves for possible acceptance.
+%% @end  
+broadcast_compeq( Id, CompID, Cnt ) ->
+    ReqMsg = #papim{ type=?PAPI_COMPREQ, val=CompID, cnt=Cnt },
+    broadcast( ReqMsg ),
+    process_fmsg( Id, ReqMsg ). % Send fmsg to self, making sure we know its us
+
