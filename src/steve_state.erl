@@ -26,8 +26,7 @@
          terminate/2,
          code_change/3]).
 
--record(steve_state, {  id, contact,
-                        reqs, caps, db,
+-record(steve_state, {  reqs, caps, db,
                         % Temporary State maintained:
                         cap_store = [], % ReqHash -> Capability Action store.
                         out_req   = [], % ReqHash -> Outstanding Requests.
@@ -126,7 +125,8 @@ handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
     {reply, {reply,?CAPI_REQDEF( Cid, ReqDef )}, State}; 
 
 handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, 
-            #steve_state{id=MyId, out_req=Outs} = State ) ->
+            #steve_state{out_req=Outs} = State ) ->
+    MyId = papi:ci_fid( my_contact_info() ),
     CID = steve_util:uuid(), % Generate new Computation ID.
     broadcast_compeq( MyId, CID, Cnt ), % Broadcast client has new comp-request
     NewState = State#steve_state{out_req=[{CID,Id}|Outs]},
@@ -143,6 +143,10 @@ handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From,
     end;
 handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
     {reply, run_query( Qry, State ), State };
+
+handle_call({cmsg, #capi_note{type=Note,cnt=Cnt}}, _From, State) ->
+    NewState = run_note( Note, Cnt, State ),
+    {reply, noreply, NewState};
 
 handle_call({fmsg, Friend, Msg}, _From, State) ->
     handle_papim( Friend, Msg, State ),
@@ -204,10 +208,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 %% @hidden
 %% @doc Parses the incoming arguments.
-parse_args( [], State) -> 
-    ContactInfo = my_contact_info(),
-    FID = papi:ci_fid(ContactInfo),
-    State#steve_state{id=FID,contact=ContactInfo}; 
+parse_args( [], State) -> State; 
 parse_args( [{rcfile, Cnt}|Rest], State ) ->
     {[Requests,CapList],_} = proplists:split(Cnt, [requests, capability]),
     RequestStruct = hd(Requests), %LATER: warn user that only the first is considered.
@@ -251,6 +252,18 @@ run_query( {cid, CID}, #steve_state{db=DB} ) ->
 run_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
 %% @hidden
+%% @doc Handle a notification message and update state.
+run_note( "CompAccept", Cnt, #steve_state{waiting_acceptors=Waiters} = State )->
+    CID = proplists:get_value(<<"cid">>,Cnt),
+    FriendInfo = proplists:get_value(<<"friend">>,Cnt),
+    {CIDWaiters, _} = lists:partition(fun({C,_,_})->C==CID end, Waiters),
+    case lists:keysearch( FriendInfo, 2, CIDWaiters ) of
+        false -> State;
+        {value, {_, _, _FConn}} ->
+            State %TODO: Send computation to Friend.
+    end.
+
+%% @hidden
 %% @doc Convert the note to its object type.
 tonote({compack, FriendInfo, CID}) ->
     ?CAPI_NOTE( "CompAck", [{<<"friend">>,FriendInfo},{<<"cid">>,CID}] );
@@ -273,7 +286,8 @@ handle_papim( Friend, Msg, State ) ->
 
 %% @hidden
 %% @doc If the message is forwarded, handle sending it back, otherwise process.
-proc_check( Friend, #papim{from=Fwd} = Msg, #steve_state{id=MyID} = State ) ->
+proc_check( Friend, #papim{from=Fwd} = Msg, State ) ->
+    MyID = papi:ci_fid( my_contact_info() ),
     case state_db:lookup_mask(Fwd) of
         {FriendID, FwdID} -> % Its just a forward, so send it back.
             NewMsg = Msg#papim{from=FwdID},
@@ -307,7 +321,8 @@ process_msg( Res, Friend ) ->
 %% @hidden
 %% @doc Run the handling logic per type of message it is.
 handle_papim_type( #papim{type=?PAPI_COMPREQ, cnt=Cnt} = Msg, 
-                   #steve_state{contact=ContactInfo, caps=Cap} = _State ) -> 
+                   #steve_state{caps=Cap} = _State ) -> 
+   ContactInfo = my_contact_info(),
    case requests:match( Cap, Cnt ) of
        {ok, nomatch} -> % No match, so forward to all friends except sender.
            {forward, Msg};
@@ -442,7 +457,9 @@ check_result_state( [H|R], Done, Missing ) ->
 %% @doc Creates a Result Cast message using just the ID of the result. It looks
 %%   up all data from the database.
 %% @end
-build_rescast( ID, #steve_state{id=FID,contact=ContactInfo} = _State ) -> 
+build_rescast( ID, _State ) ->
+   ContactInfo = my_contact_info(),
+   FID = papi:ci_fid( ContactInfo ), 
    case steve_db:get_comp( ID ) of 
        {error, Reason} -> {error, Reason};
        C -> 
