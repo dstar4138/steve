@@ -11,7 +11,6 @@
 -module(steve_action).
 
 -include("debug.hrl").
--include("actions.hrl").
 
 -export( [do/3, default_vars/0] ).
 
@@ -64,8 +63,13 @@ do( {return, ReturnObj}, _Options, Vars ) ->
     case ReturnObj of
         all -> ok; %TODO: zip up all in working dir to ship back (THIS WILL 
                    %  INCLUDE OLD ARCHIVE UNLESS IT WAS REMOVED).
-                   %TODO: Consider other options here such as lists of files.  
-        Path -> {mark_return, fix_vars( loc( c(Path), Vars), Vars )}
+                   %TODO: Consider other options here such as lists of files. 
+        {contents, Path} ->
+            CleanPath = fix_vars( loc( c(Path), Vars ), Vars ),
+            Contents = readlines( CleanPath ),
+            {mark_return, {value, Contents}};
+        Path -> 
+            {mark_return, fix_vars( loc( c(Path), Vars), Vars )}
     end;
 
 %% If we don't know the Action, then error report.
@@ -120,3 +124,15 @@ loc( Dir, Vars ) ->
     _WorkingDir = replace("workingdir",Vars),
     Dir. %XXX: This needs to be fixed, We need to check relative path.
          % See for a python version: http://stackoverflow.com/q/3812849
+
+%% @hidden
+%% @doc Read the contents of a file into memory.
+readlines( Path ) ->
+    {ok, Device} = file:open( Path, [read] ),
+    try lists:reverse( get_all_lines(Device, []) )
+    after file:close(Device) end.
+get_all_lines( Device, Acc ) ->
+    case io:get_line( Device, "" ) of
+        eof -> Acc;
+        Line -> get_all_lines( Device, [Line|Acc] )
+    end.
