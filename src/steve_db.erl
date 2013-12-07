@@ -114,7 +114,7 @@
 %% @doc Install the Database on the local system based on the passed in options.
 verify_install( Dir ) -> 
     create_schema( Dir ),           % Sets up disk
-    ok = application:start(mnesia), % Load to memory
+    ok = start_mnesia(),            % Load to memory
     ok = make_tables( ),            % Create disc copies
     connect_to_mnesia().            % Wait for locks on tables, get init state
 
@@ -361,6 +361,15 @@ lookup_mask( Mask ) ->
 %%% ==========================================================================
 %%% Private Functionality
 %%% ========================================================================== 
+
+%% @hidden
+%% @doc Starts up the mnesia application and masks any warnings.
+start_mnesia() ->
+    case application:start(mnesia) of
+        {error, {already_started, mnesia}} -> ok;
+        ok -> ok;
+        Err -> Err
+    end.
 
 %% @hidden 
 %% @doc Creates a t_comp record using the result record pulled from the PAPI

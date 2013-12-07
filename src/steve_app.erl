@@ -74,6 +74,7 @@ stop(_State) ->
 startup_inets() ->
     case inets:start() of
         ok  -> inets:start(tftp, steve_ftp:get_config());
+        {error, {already_started, inets}} -> {ok, ignored};
         Err -> Err
     end.
 
