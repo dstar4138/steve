@@ -103,7 +103,7 @@ start_link( StartArgs ) ->
 %% @doc Initializes the server
 %%--------------------------------------------------------------------
 -spec init( list() ) -> {ok, #steve_state{}}.
-init( StartArgs ) ->
+init( [StartArgs] ) ->
     ?DEBUG("Got Args: ~p~n",[StartArgs]),
     process_flag(trap_exit, true),
     State = parse_args(StartArgs, #steve_state{}),
@@ -131,21 +131,21 @@ handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
 
 handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, 
             #steve_state{out_req=Outs} = State ) ->
-    MyId = papi:ci_fid( my_contact_info() ),
-    CID = steve_util:uuid(), % Generate new Computation ID.
-    steve_state_msg:broadcast_compeq( MyId, CID, Cnt ), % Broadcast client has new comp-request
-    NewState = State#steve_state{out_req=[{CID,Id}|Outs]},
-    if Files -> % If Client has files to send over, open a connection and inform
-            case steve_ftp:get_conn_port() of
+    CID = steve_util:uuid(),                      % Generate new Computation ID.
+    steve_state_msg:broadcast_compeq( CID, Cnt ), % Broadcast new CompReq msg.
+    check_local_caplist( Id, CID, Cnt, State ),   % Check local capability.
+    Reply =
+        if Files -> % If Client has files to send over, open a connection and inform
+             case steve_ftp:get_conn_port() of
                 {error, Reason} ->
                    ?ERROR("steve_state:handle_call",Reason,[]),
-                    {reply, {reply,?CAPI_COMP_RET( CID)}, NewState};
-                Conn -> 
-                    {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, NewState}
-            end;
-        true ->
-            {reply, {reply, ?CAPI_COMP_RET( CID )}, NewState}
-    end;
+                    {reply,?CAPI_COMP_RET( CID)};
+                Conn -> {reply,?CAPI_COMP_RET( CID, Conn )}
+             end;
+           true -> {reply, ?CAPI_COMP_RET( CID )}
+        end,
+    NewState = State#steve_state{out_req=[{CID,Id}|Outs]},
+    {reply, Reply, NewState};
 
 handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
     ClientReply = steve_state_msg:handle_query( Qry, State ), 
@@ -166,19 +166,6 @@ handle_call(_Request, _From, State) -> {noreply, State}.
 %% @doc Handles casted messages from spawned processes.
 %%--------------------------------------------------------------------
 -spec handle_cast( any(), #steve_state{} ) -> {noreply, #steve_state{}}.
-handle_cast( {notify_client, OfThing}, 
-             #steve_state{out_req=Outs, waiting_acceptors=Waits} = State ) ->
-    NewState =  
-        case OfThing of
-            {compack, FriendInfo, CID, FriendConn} ->
-                ClientID = proplists:get_value( CID, Outs ), 
-                Note = tonote({compack, FriendInfo, CID}),
-                steve_cmq:send_to_client( ClientID, {note, Note} ),
-                State#steve_state{ waiting_acceptors=
-                                      [{CID, FriendInfo, FriendConn}|Waits] };
-            _ -> State
-        end,
-    {noreply, NewState};
 handle_cast( {temp_save, Msg}, State ) ->
     NewState = update_state( Msg, State ),
     {noreply, NewState};
@@ -237,8 +224,15 @@ my_contact_info( ) ->
     %% The following must be valid JSON for message sending.
     papi:create_ci( BIP, Port, CID ).
 
-update_state( {{waiting_acceptors, Req, Conn}, FriendInfo}, _State ) ->
-    gen_server:cast( ?MODULE, {notify_client, {compack, FriendInfo, Req, Conn}} );
+%% @hidden
+%% @doc See handle_cast/2, this will update the state based on a temp_save/1
+%%   call. They are made by the PAPI handlers.
+%% @end  
+update_state( {waiting_acceptors, CID, FriendConn}, 
+              #steve_state{out_req=Outs, waiting_acceptors=Waits} = State ) ->
+    ClientID = proplists:get_value( CID, Outs ), 
+    notify_client(ClientID, {compack, FriendConn, CID}),
+    State#steve_state{ waiting_acceptors=[{CID, FriendConn}|Waits] };
 update_state( {cap_req, Hash, Cap}, #steve_state{ cap_store=C } = State ) ->
     State#steve_state{ cap_store=[{Hash,Cap}|C] };
 update_state( Unknown, State ) ->
@@ -246,8 +240,34 @@ update_state( Unknown, State ) ->
     State.
 
 %% @hidden
+%% @doc Checks local capability for a particular ComputationID, if it's 
+%%   able to handle it, then we'll message the Client with a CompAck 
+%%   notification.
+%% @end  
+check_local_caplist( ClientId, CID, RawCnt, #steve_state{ caps=CapStruct } ) ->
+   spawn( fun() -> 
+        Request = capi:ref_def_map( RawCnt ),
+        case requests:match( CapStruct, Request ) of
+            {ok, nomatch} -> ok;
+            {ok, Act} ->
+                temp_save( {cap_req, CID, Act } ),
+                notify_client( ClientId, {compack, my_contact_info(), CID} );
+            {error, badcaps} ->
+                ?ERROR("steve_state:check_local_caplist",
+                       "Found Bad Capability when trying to match ~p",[Request])
+        end
+    end).
+%% @hidden
+%% @doc Send a Notification to a client. Will construct the note message.
+notify_client( ClientID, NoteMsg ) ->
+    NoteObj = capi:encode( tonote( NoteMsg ) ),
+    BClientID = steve_util:str_to_uuid( ClientID ),
+    steve_cmq:send_to_client( ClientID, NoteObj ).
+
+%% @hidden
 %% @doc Convert the note to its object type.
-tonote({compack, FriendInfo, CID}) ->
+tonote({compack, FriendConn, CID}) ->
+    FriendInfo = FriendConn, %TODO: Must update Conn Structure with reputation and name.
     ?CAPI_NOTE( "CompAck", [{<<"friend">>,FriendInfo},{<<"cid">>,CID}] );
 tonote( _ ) -> nil.
 

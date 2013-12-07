@@ -23,8 +23,7 @@
         { arch, ["x86", "x86_64", "arm"] }, 
 
     % Executables required, list of tuples: {execname, version}
-        { exec, { {"name",lowercase}, 
-                  {"version", version}} },
+        { exec, lowercase },
 
     % Library List, list of tuples: {libary name, version}
         { lib, { {"name",lowercase}, 
@@ -45,9 +44,7 @@
 
 %% Executable types:
 { capability, [ % Python2.7
-    {exec, [ {"python", "2.7.3"},
-             {"python2.7", "2.7.3"}
-           ]}, % Accepts either executable.
+    {exec, "python"},
 
     {lib, {"gnupginterface","0.3.2"}}
     %% ... 

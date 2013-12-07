@@ -220,11 +220,8 @@ handle_info( {pg_message, _From, ?CLIENT_GROUP, GroupMsg}, StateName,
         {fwd, Excludes, Data} ->
             send_after_check( Excludes, Data, State ),
             {next_state, StateName, State, ?TIMEOUT};
-        {note, Note} ->
-            send_note( S, Note ),
-            {next_state, StateName, State, ?TIMEOUT};
         _ -> % Unknown message
-            ?DEBUG("Unknown Group message, ignoring: ~p",[GroupMsg]),
+            ?DEBUG("Unknown Group message, ignoring: ~p, ~p",[GroupMsg, State]),
             {next_state, StateName, State, ?TIMEOUT}
     end;
 handle_info( {get_conn_details, From}, StateName, 
@@ -278,10 +275,6 @@ process( Msg , NextState, State = #state{sock=S}) ->
             ?DEBUG("State server says for MQ to shutdown with reason: ~p",[Reason]),
             {stop, Reason, State}
     end.
-
-%% @hidden
-%% @doc Converts the note to a binary message before sending it off. 
-send_note( S, Note ) -> send( S, capi:encode( Note ) ).
 
 %% @hidden
 %% @doc Since we are using {packet,line} based sockets we need to wrap all 

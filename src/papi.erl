@@ -117,7 +117,7 @@ ci_fid( C ) -> prop_uuid( <<"fid">>, C ).
 %% @hidden
 %% @doc Easy extraction of UUID's from 
 prop_uuid( IDName, PropList ) ->
-    case proplist:get_value( IDName, PropList, nil ) of
+    case proplists:get_value( IDName, PropList, nil ) of
         nil -> nil;
         ID -> uuid_decode( ID )
     end.

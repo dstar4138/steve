@@ -14,7 +14,7 @@
 -export([parse/1]).
 -export([encode/1]).
 
--export([gen_req_def/1]).
+-export([gen_req_def/1, ref_def_map/1]).
 
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
 %% message record.
@@ -147,4 +147,20 @@ gen_req_def_val( List=[H|_] )   when is_list( List ) ->
 b( N ) when is_binary( N ) -> N;
 b( N ) when is_list( N ) -> erlang:list_to_binary( N );
 b( N ) when is_atom( N ) -> erlang:atom_to_binary( N, unicode ).
+
+%% @hidden
+%% @doc Converts the json compatible reqstruct back into a map we can
+%%   use when matching.
+%% @end  
+ref_def_map( LDict ) -> {request, ref_def_map( LDict, [] )}.
+ref_def_map([], Acc) -> Acc;
+ref_def_map([Map|R], Acc) -> ref_def_map( R, [gen_map_reqdef( Map )|Acc] ).
+gen_map_reqdef(Map) ->
+    Name = proplists:get_value(<<"name">>,Map),
+    Value = proplists:get_value(<<"val">>,Map),
+    try
+        BName = erlang:binary_to_existing_atom(Name,latin1),
+        LValue = erlang:bitstring_to_list( Value ),
+        {BName, LValue}
+    catch _:_ -> {Name,Value} end.
 

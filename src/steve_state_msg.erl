@@ -81,12 +81,7 @@ proc_check( Friend, #papim{from=Fwd} = Msg, State ) ->
             NewMsg = Msg#papim{from=FwdID},
             steve_conn:send( friends, FriendID, NewMsg );
         false -> % It's a new message, so handle it:
-            Res = case handle_papim_type( Msg, State) of
-                {update, Update, Reply} -> 
-                          steve_state:update_state( {Update, Friend}, State ),
-                    Reply;
-                Reply -> Reply
-            end,
+            Res = handle_papim_type( Msg, State ),
 
             % If we are who sent the message, that means it came on
             % loopback. We would have therefore already have broadcasted
@@ -114,7 +109,7 @@ handle_papim_type( #papim{type=?PAPI_COMPREQ, cnt=Cnt} = Msg,
    case requests:match( Cap, Cnt ) of
        {ok, nomatch} -> % No match, so forward to all friends except sender.
            {forward, Msg};
-       {ok, Cap} -> % Capable, so send back ack. and save reqdef hash for ref
+       {ok, Act} -> % Capable, so send back ack. and save reqdef hash for ref
            Hash = Msg#papim.val,
            NewAck = #papim{ from=Msg#papim.from,
                             type=?PAPI_COMPACK,
@@ -127,7 +122,7 @@ handle_papim_type( #papim{type=?PAPI_COMPREQ, cnt=Cnt} = Msg,
                                       % by substituting hashes.      
                             val=ContactInfo
                           },
-           steve_state:temp_save( {cap_req, Hash, Cap} ),
+           steve_state:temp_save( {cap_req, Hash, Act} ),
            {reply, NewAck};
        {error, badcaps} -> 
            ?ERROR("steve_state:handle_papim",
@@ -141,7 +136,7 @@ handle_papim_type( #papim{type=?PAPI_COMPACK,
     case lists:keysearch( Hash, 1, Outs ) of
         false -> noreply; % Discard, we don't remember request.
         {Hash, Req} ->  %Push computation passing to new proc and send noreply
-            {update, {waiting_acceptors, Req, Conn}, noreply}
+            steve_state:temp_save( {waiting_acceptors, Req, Conn} )
     end;
 handle_papim_type( #papim{type=?PAPI_RESCAST, cnt=Hash, val=ResReport} = Msg, 
                    _State ) -> 
@@ -242,9 +237,7 @@ broadcast_resreq() ->
 %% @doc Sends out a computation request to all connected friends, and also to
 %%   ourselves for possible acceptance.
 %% @end  
-broadcast_compeq( NodeId, CompID, Cnt ) ->
+broadcast_compeq( CompID, Cnt ) ->
     ReqMsg = #papim{ type=?PAPI_COMPREQ, val=CompID, cnt=Cnt },
-    broadcast( ReqMsg ),
-    steve_state:process_fmsg( NodeId, ReqMsg ). % Send fmsg to self, making 
-                                                %  sure we know its us
+    broadcast( ReqMsg ).
 
