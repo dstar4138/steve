@@ -13,7 +13,7 @@
 
 %% API
 -export([start_link/1]).
--export([process_cmsg/1, process_fmsg/2]).
+-export([process_cmsg/2, process_fmsg/2]).
 -export([peer_write_perm_check/2, 
          peer_read_perm_check/2,
          peer_file_event/2]).
@@ -56,7 +56,7 @@ peer_file_event( CompID, Event ) ->
 %% @doc Ask the state server to process a client's message. This is called
 %% from steve_cmq:process/2.
 %% @end
-process_cmsg( Msg ) -> gen_server:call( ?MODULE, {cmsg, Msg} ).
+process_cmsg( CliID, Msg ) -> gen_server:call( ?MODULE, {cmsg, CliID, Msg} ).
 
 %% @doc Ask the state server to process a friend's message. This is called
 %% from steve_fmq:process/2.
@@ -124,12 +124,12 @@ init( [StartArgs] ) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
-    Cid = case Id of nil -> steve_util:uuid(); _ -> Id end,
+handle_call({cmsg, Cid, #capi_reqdef{id=_Id}}, _From, State) ->
+%    Cid = case Id of nil -> steve_util:uuid(); _ -> Id end,
     ReqDef = State#steve_state.reqs,
     {reply, {reply,?CAPI_REQDEF( Cid, ReqDef )}, State}; 
 
-handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, 
+handle_call({cmsg, Id, #capi_comp{ needsock=Files, cnt=Cnt}}, _From, 
             #steve_state{out_req=Outs} = State ) ->
     CID = steve_util:uuid(),                      % Generate new Computation ID.
     steve_state_msg:broadcast_compeq( CID, Cnt ), % Broadcast new CompReq msg.
@@ -260,14 +260,17 @@ check_local_caplist( ClientId, CID, RawCnt, #steve_state{ caps=CapStruct } ) ->
 %% @hidden
 %% @doc Send a Notification to a client. Will construct the note message.
 notify_client( ClientID, NoteMsg ) ->
-    NoteObj = capi:encode( tonote( NoteMsg ) ),
-    BClientID = steve_util:str_to_uuid( ClientID ),
-    steve_cmq:send_to_client( ClientID, NoteObj ).
+    NoteObj = tonote( NoteMsg ),
+    ?DEBUG("TONOTE(~p) -> ~p",[NoteMsg, NoteObj]),
+    Msg = capi:encode( NoteObj ),
+    ?DEBUG("ENCODED -> ~p",[Msg]),
+    steve_cmq:send_to_client( ClientID, Msg ).
 
 %% @hidden
 %% @doc Convert the note to its object type.
 tonote({compack, FriendConn, CID}) ->
     FriendInfo = FriendConn, %TODO: Must update Conn Structure with reputation and name.
-    ?CAPI_NOTE( "CompAck", [{<<"friend">>,FriendInfo},{<<"cid">>,CID}] );
+    BCID = capi:uuid_encode( CID ),
+    ?CAPI_NOTE( "CompAck", [{<<"friend">>,FriendInfo},{<<"cid">>,BCID}] );
 tonote( _ ) -> nil.
 

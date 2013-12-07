@@ -115,7 +115,7 @@ init([]) ->
 %% same name as the current state name StateName is called to handle
 %% the event. It is also called if a timeout occurs.
 %%
-%% @spec state_name(Event, State) ->
+%% @spec state_name(Event, State) -
 %%                   {next_state, NextStateName, NextState} |
 %%                   {next_state, NextStateName, NextState, Timeout} |
 %%                   {stop, Reason, NewState}
@@ -213,9 +213,13 @@ handle_info( {pg_message, _From, ?CLIENT_GROUP, GroupMsg}, StateName,
             ?DEBUG("MQ got broadcasted shutdown message.", []),
             gen_tcp:close(S),
             {stop, normal, State};
-        {send, Cid, Data} ->
-            ?DEBUG("Sending data to client (~p): ~p", [Cid, Data]),
-            ok = send( S, Data ),
+        {send, CliID, Data} ->
+            (case steve_util:uuid_compare( CliID, Cid ) of
+                true ->
+                    ok = send( S, Data ),
+                   ?DEBUG("Sending data to client (~p): ~p", [Cid, Data]);
+                false -> ok
+            end),
             {next_state, StateName, State, ?TIMEOUT};
         {fwd, Excludes, Data} ->
             send_after_check( Excludes, Data, State ),
@@ -260,9 +264,9 @@ handle_error( Err, _State = #state{sock=S} ) ->
 %% @doc Send message to state server for processing, wait for reply and either
 %% forward over wire or ignore.
 %% @end
-process( Msg , NextState, State = #state{sock=S}) ->
+process( Msg , NextState, State = #state{sock=S, cliID=ID}) ->
     ?DEBUG("Processing CAPI Message in State server: ~p", [Msg]),
-    case steve_state:process_cmsg( Msg ) of
+    case steve_state:process_cmsg( ID, Msg ) of
         {reply, Rep} -> 
             RepEnc = capi:encode( Rep ),
             ?DEBUG("State server says to reply with: ~p",[RepEnc]),

@@ -14,7 +14,7 @@
 -define(CAPI_QRY( Type ), #capi_query{ type = Type }).
 
 -record(capi_comp,{id :: string(), cnt :: steve_compreq(), needsock :: boolean()}).
--define(CAPI_COMP( Cnt, Sock ), #capi_comp{ cnt = Cnt, needsock = Sock }).
+-define(CAPI_COMP( ID, Cnt, Sock ), #capi_comp{ id=ID, cnt = Cnt, needsock = Sock }).
 
 -type cmsg() :: #capi_reqdef{} | #capi_query{} | #capi_comp{}.
 

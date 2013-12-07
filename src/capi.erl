@@ -14,6 +14,7 @@
 -export([parse/1]).
 -export([encode/1]).
 
+-export([uuid_encode/1]).
 -export([gen_req_def/1, ref_def_map/1]).
 
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
@@ -63,13 +64,19 @@ encode( #capi_note{ type=T, cnt=Cnt } ) ->
 uuid_encode( ID ) -> erlang:list_to_binary( steve_util:uuid_to_str( ID ) ).
 
 %% @hidden
+%% @doc Decodes a UUID value for bringing into Steve.
+uuid_decode( Nil ) when is_atom( Nil ) -> nil;
+uuid_decode( ID ) ->
+    steve_util:str_to_uuid( erlang:binary_to_list( ID ) ).
+
+%% @hidden
 %% @doc Converts a json-proplist into a capi erlang record. See capi.hrl for
 %% record definitions.
 %% @end
 decode( PList ) ->
     case gv(<<"msg">>, PList ) of
         <<"reqdef">> ->
-            ID = try steve_util:str_to_uuid( gv(<<"id">>,PList) )
+            ID = try uuid_decode( gv(<<"id">>,PList) )
                  catch _:_ -> nil end,
             {ok, ?CAPI_REQDEF( ID )};
         <<"qry">> -> 
@@ -80,7 +87,10 @@ decode( PList ) ->
         <<"comp">> -> 
             (case gv(<<"cnt">>, PList) of
                     nil -> {error, invalid_msg};
-                    Other -> build_comp( Other, gvb( <<"needsock">>, PList) )
+                    Other -> 
+                        build_comp( uuid_decode( gv(<<"id">>, PList) ),
+                                    Other, 
+                                    gvb( <<"needsock">>, PList) )
              end);
         _ -> {error, invalid_msg}
     end.
@@ -105,8 +115,8 @@ build_qry( Unknown ) ->
 %% @doc Builds a computation request message, or returns invalid_msg if
 %% content is not a prop-list.
 %% @end
-build_comp( Cnt, Sock ) when is_list( Cnt ) -> {ok, ?CAPI_COMP( Cnt, Sock ) };
-build_comp( Cnt, _ ) -> 
+build_comp( ID, Cnt, Sock ) when is_list( Cnt ) -> {ok, ?CAPI_COMP( ID, Cnt, Sock ) };
+build_comp( _, Cnt, _ ) -> 
     ?DEBUG("Bad Comp Request, 'cnt' must be proplist: ~p~n",[Cnt]),
     {error, invalid_msg}.
 
