@@ -47,7 +47,12 @@ encode( #capi_query_ret{ success=Success, result = Res } ) ->
                 true -> <<"qr">>;
                 false -> <<"qe">>
           end,
-    steve_util:encode_json( [{<<"msg">>, Msg},{<<"cnt">>,Res}] ).
+    steve_util:encode_json( [{<<"msg">>, Msg},{<<"cnt">>,Res}] );
+encode( #capi_note{ type=T, cnt=Cnt } ) ->
+    Msg = [{ <<"msg">>,<<"note">>},
+           { <<"type">>,b(T)},
+           {<<"cnt">>, Cnt}],
+    steve_util:encode_json( Msg ). 
 
 %% ===========================================================================
 %% Internal Functions

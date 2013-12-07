@@ -32,4 +32,8 @@
 -define(CAPI_QRY_RET( Res ), #capi_query_ret{ success=true, result=Res }).
 -define(CAPI_QRY_ERR( Res ), #capi_query_ret{ success=false, result=Res }).
 
--type cmsg_ret() :: #capi_reqdef{} | #capi_comp_ret{} | #capi_query_ret{}.
+-record(capi_note, {type :: string(), cnt :: any()}).
+-define(CAPI_NOTE(Type, Cnt), #capi_note{type=Type,cnt=Cnt}).
+
+-type cmsg_ret() :: #capi_reqdef{} | #capi_comp_ret{} | #capi_query_ret{} | 
+                    #capi_note{}.

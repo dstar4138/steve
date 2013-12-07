@@ -30,7 +30,8 @@
                         reqs, caps, db,
                         % Temporary State maintained:
                         cap_store = [], % ReqHash -> Capability Action store.
-                        out_req   = []  % ReqHash -> Outstanding Requests.
+                        out_req   = [], % ReqHash -> Outstanding Requests.
+                        waiting_acceptors = [] % ReqHash -> Friendnfo, FriendConn 
                         }).
 
 %%%===================================================================
@@ -124,19 +125,21 @@ handle_call({cmsg, #capi_reqdef{id=Id}}, _From, State) ->
     ReqDef = State#steve_state.reqs,
     {reply, {reply,?CAPI_REQDEF( Cid, ReqDef )}, State}; 
 
-handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, State ) ->
+handle_call({cmsg, #capi_comp{id=Id, needsock=Files, cnt=Cnt}}, _From, 
+            #steve_state{id=MyId, out_req=Outs} = State ) ->
     CID = steve_util:uuid(), % Generate new Computation ID.
-    broadcast_compeq( Id, CID, Cnt ), % Broadcast client has new comp-request
+    broadcast_compeq( MyId, CID, Cnt ), % Broadcast client has new comp-request
+    NewState = State#steve_state{out_req=[{CID,Id}|Outs]},
     if Files -> % If Client has files to send over, open a connection and inform
             case steve_ftp:get_conn_port() of
                 {error, Reason} ->
                    ?ERROR("steve_state:handle_call",Reason,[]),
-                    {reply, {reply,?CAPI_COMP_RET( CID)}, State};
+                    {reply, {reply,?CAPI_COMP_RET( CID)}, NewState};
                 Conn -> 
-                    {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, State}
+                    {reply, {reply,?CAPI_COMP_RET( CID, Conn )}, NewState}
             end;
         true ->
-            {reply, {reply, ?CAPI_COMP_RET( CID )}, State}
+            {reply, {reply, ?CAPI_COMP_RET( CID )}, NewState}
     end;
 handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
     {reply, run_query( Qry, State ), State };
@@ -152,6 +155,19 @@ handle_call(_Request, _From, State) -> {noreply, State}.
 %% @doc Handles casted messages from spawned processes.
 %%--------------------------------------------------------------------
 -spec handle_cast( any(), #steve_state{} ) -> {noreply, #steve_state{}}.
+handle_cast( {notify_client, OfThing}, 
+             #steve_state{out_req=Outs, waiting_acceptors=Waits} = State ) ->
+    NewState = 
+        case OfThing of
+            {compack, FriendInfo, CID, FriendConn} ->
+                ClientID = proplists:get_value( CID, Outs ), 
+                Note = tonote({compack, FriendInfo, CID}),
+                steve_cmq:send_to_client( ClientID, {note, Note} ),
+                State#steve_state{ waiting_acceptors=
+                                      [{CID, FriendInfo, FriendConn}|Waits] };
+            _ -> State
+        end,
+    {noreply, NewState};
 handle_cast( {temp_save, Msg}, State ) ->
     NewState = update_state( Msg, State ),
     {noreply, NewState};
@@ -235,6 +251,13 @@ run_query( {cid, CID}, #steve_state{db=DB} ) ->
 run_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
 %% @hidden
+%% @doc Convert the note to its object type.
+tonote({compack, FriendInfo, CID}) ->
+    ?CAPI_NOTE( "CompAck", [{<<"friend">>,FriendInfo},{<<"cid">>,CID}] );
+tonote( _ ) -> nil.
+
+
+%% @hidden
 %% @doc Checks if the message is a repeat and discards if yes, otherwise it will
 %%   verify it's not a forwarded message coming back. If it was, then we should
 %%   forward it back to the person in our forward table. If its a normal message
@@ -256,8 +279,13 @@ proc_check( Friend, #papim{from=Fwd} = Msg, #steve_state{id=MyID} = State ) ->
             NewMsg = Msg#papim{from=FwdID},
             steve_conn:send( friends, FriendID, NewMsg );
         false -> % It's a new message, so handle it:
-            Res = handle_papim_type( Msg, State ),
- 
+            Res = case handle_papim_type( Msg, State) of
+                {update, Update, Reply} -> 
+                    update_state( {Update, Friend}, State ),
+                    Reply;
+                Reply -> Reply
+            end,
+
             % If we are who sent the message, that means it came on
             % loopback. We would have therefore already have broadcasted
             % or forwarded. We can safely ignore the result of processing.
@@ -310,8 +338,7 @@ handle_papim_type( #papim{type=?PAPI_COMPACK,
     case lists:keysearch( Hash, 1, Outs ) of
         false -> noreply; % Discard, we don't remember request.
         {Hash, Req} ->  %Push computation passing to new proc and send noreply
-            spawn( fun() -> ask_friends_help(Conn, Req) end ),
-            noreply
+            {update, {waiting_acceptors, Req, Conn}, noreply}
     end;
 handle_papim_type( #papim{type=?PAPI_RESCAST, cnt=Hash, val=ResReport} = Msg, 
                    _State ) -> 
@@ -379,7 +406,8 @@ my_contact_info( ) ->
     %% The following must be valid JSON for message sending.
     papi:create_ci( BIP, Port, CID ).
 
-
+update_state( {{waiting_acceptors, Req, Conn}, FriendInfo}, _State ) ->
+    gen_server:cast( ?MODULE, {notify_client, {compack, FriendInfo, Req, Conn}} );
 update_state( {cap_req, Hash, Cap}, #steve_state{ cap_store=C } = State ) ->
     State#steve_state{ cap_store=[{Hash,Cap}|C] };
 update_state( Unknown, State ) ->
@@ -440,8 +468,8 @@ check_for_updates() ->
 %% @doc Sends out a computation request to all connected friends, and also to
 %%   ourselves for possible acceptance.
 %% @end  
-broadcast_compeq( Id, CompID, Cnt ) ->
+broadcast_compeq( NodeId, CompID, Cnt ) ->
     ReqMsg = #papim{ type=?PAPI_COMPREQ, val=CompID, cnt=Cnt },
     broadcast( ReqMsg ),
-    process_fmsg( Id, ReqMsg ). % Send fmsg to self, making sure we know its us
+    process_fmsg( NodeId, ReqMsg ). % Send fmsg to self, making sure we know its us
 
