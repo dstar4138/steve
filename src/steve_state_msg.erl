@@ -50,14 +50,38 @@ handle_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
 %% @doc Handle a notification message and update state.
 handle_note( "CompAccept", Cnt, #steve_state{waiting_acceptors=Waiters} = State )->
-    CID = proplists:get_value(<<"cid">>,Cnt),
+    CID = capi:uuid_decode( proplists:get_value(<<"cid">>,Cnt) ),
     FriendInfo = proplists:get_value(<<"friend">>,Cnt),
-    {CIDWaiters, _} = lists:partition(fun({C,_,_})->C==CID end, Waiters),
-    case lists:keysearch( FriendInfo, 2, CIDWaiters ) of
-        false -> State;
-        {value, {_, _, _FConn}} ->
-            State %TODO: Send computation to Friend.
-    end.
+    case check_if_self( FriendInfo ) of
+        true ->
+            ?DEBUG("Accepted computation acknowledgement from self: ~p",[CID]), 
+            steve_state:trigger_computation( CID, State ),
+            update_cap_store( CID, State );
+        false ->
+            {CIDWaiters, _} = lists:partition(fun({C,_,_})->C==CID end, Waiters),
+            (case lists:keysearch( FriendInfo, 2, CIDWaiters ) of
+                false -> State;
+                {value, {_, _, _FConn}} ->
+                    State %TODO: Send computation to Friend.
+             end)
+    end;
+handle_note( Type, Cnt, State ) ->
+    ?DEBUG("UNKNOWN NOTE MESSAGE: ~p -> ~p",[Type, Cnt]), State.
+
+check_if_self( FriendInfo ) ->
+    Fid = papi:ci_fid( FriendInfo ),
+    MyID = papi:ci_fid( steve_state:my_contact_info() ),
+    Fid == MyID.
+
+update_cap_store( CID, #steve_state{cap_store=Store} = State ) ->
+    NewStore = case lists:keytake( CID, 1, Store ) of
+                   {value, _, New} -> New;
+                   false -> Store %TODO: This is an error, we shouldn't
+                                  % NOT have the action list in the cap_store.
+               end, 
+    State#steve_state{cap_store=NewStore}.
+
+
 
 %% @doc Checks if the message is a repeat and discards if yes, otherwise it will
 %%   verify it's not a forwarded message coming back. If it was, then we should

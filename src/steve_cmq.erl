@@ -145,7 +145,8 @@ init([]) ->
     {next_state, 'WAIT_FOR_DATA', State, ?TIMEOUT};
 'WAIT_FOR_DATA'( timeout, State) ->
     ?ERROR("Client connection timeout - closing.",[]),
-    {stop, normal, State};
+%    {stop, normal, State};
+    {next_state, 'WAIT_FOR_DATA', State, ?TIMEOUT};
 'WAIT_FOR_DATA'( Msg, State ) ->
     ?ERROR("steve_cmq:wait_for_data", "Bad event: ~p", [Msg]),
     {next_state, 'WAIT_FOR_DATA', State, ?TIMEOUT}.

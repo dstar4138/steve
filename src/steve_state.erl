@@ -147,11 +147,11 @@ handle_call({cmsg, Id, #capi_comp{ needsock=Files, cnt=Cnt}}, _From,
     NewState = State#steve_state{out_req=[{CID,Id}|Outs]},
     {reply, Reply, NewState};
 
-handle_call({cmsg, #capi_query{type=Qry}}, _From, State) ->
+handle_call({cmsg, _Id, #capi_query{type=Qry}}, _From, State) ->
     ClientReply = steve_state_msg:handle_query( Qry, State ), 
     {reply, ClientReply, State };
 
-handle_call({cmsg, #capi_note{type=Note,cnt=Cnt}}, _From, State) ->
+handle_call({cmsg, _Id, #capi_note{type=Note,cnt=Cnt}}, _From, State) ->
     NewState = steve_state_msg:handle_note( Note, Cnt, State ),
     {reply, noreply, NewState};
 
@@ -261,9 +261,7 @@ check_local_caplist( ClientId, CID, RawCnt, #steve_state{ caps=CapStruct } ) ->
 %% @doc Send a Notification to a client. Will construct the note message.
 notify_client( ClientID, NoteMsg ) ->
     NoteObj = tonote( NoteMsg ),
-    ?DEBUG("TONOTE(~p) -> ~p",[NoteMsg, NoteObj]),
     Msg = capi:encode( NoteObj ),
-    ?DEBUG("ENCODED -> ~p",[Msg]),
     steve_cmq:send_to_client( ClientID, Msg ).
 
 %% @hidden
@@ -273,4 +271,16 @@ tonote({compack, FriendConn, CID}) ->
     BCID = capi:uuid_encode( CID ),
     ?CAPI_NOTE( "CompAck", [{<<"friend">>,FriendInfo},{<<"cid">>,BCID}] );
 tonote( _ ) -> nil.
+
+
+%% @hidden
+%% @doc called from steve_state_msg:handle_note(CompAccept).
+trigger_computation( CID, #steve_state{cap_store=Store} = _State ) ->
+    case lists:keyfind( CID, 1, Store ) of
+        {_, ActionList} -> steve_comp_sup:start_computation( CID, ActionList );
+        false -> 
+            ?ERROR("steve_state:trigger_computation",
+                   "Attempting to trigger a computation we didn't accept: ~p",
+                   [CID])
+    end.
 

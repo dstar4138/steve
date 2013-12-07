@@ -14,7 +14,7 @@
 -export([parse/1]).
 -export([encode/1]).
 
--export([uuid_encode/1]).
+-export([uuid_encode/1,uuid_decode/1]).
 -export([gen_req_def/1, ref_def_map/1]).
 
 %% @doc Parses a RawData packet from a TCP socket, and converts it to a CAPI 
@@ -92,6 +92,13 @@ decode( PList ) ->
                                     Other, 
                                     gvb( <<"needsock">>, PList) )
              end);
+        <<"note">> ->
+            (case gv(<<"cnt">>, PList) of
+                    nil -> {error, invalid_msg};
+                    Other ->
+                        build_note( gv(<<"type">>, PList),
+                                    Other )
+            end);
         _ -> {error, invalid_msg}
     end.
 
@@ -118,6 +125,14 @@ build_qry( Unknown ) ->
 build_comp( ID, Cnt, Sock ) when is_list( Cnt ) -> {ok, ?CAPI_COMP( ID, Cnt, Sock ) };
 build_comp( _, Cnt, _ ) -> 
     ?DEBUG("Bad Comp Request, 'cnt' must be proplist: ~p~n",[Cnt]),
+    {error, invalid_msg}.
+
+%% @hidden
+%% @doc Builds a client's notification for internal parsing. 
+build_note( <<"CompAccept">>, Cnt ) ->
+    {ok, ?CAPI_NOTE( "CompAccept", Cnt )}; %TODO: actually parse Cnt
+build_note( Type, Cnt ) ->
+    ?ERROR("capi:build_note","Unknown Notification Type: ~p(~p)",[Type,Cnt]),
     {error, invalid_msg}.
 
 
