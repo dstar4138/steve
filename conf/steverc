@@ -34,12 +34,12 @@
 
 % THE CAPABILITY LIST OF THIS MACHINE.
 { capability, [
-        {task, "run"}, % I don't want to do compiling
-        {desire, "out"}, % Not letting you save files, its all going to get rm
+        {task, "run"},   % Don't do system builds, only runs "make"
+        {desire, "all"}, % Returning everything all the time.
 
         {os, "linux"},
         {osv, ["3.5.*","ubuntu"]},
-        {arch, "x86"}],
+        {arch, "x86_64"}],
   global }. 
 
 %% Executable types:
@@ -49,14 +49,13 @@
     %% {lib, {"gnupginterface","0.3.2"}}
     %% ... 
     ],
-  [ % Actions to take to capture output
-        %{run, "unzip %compname%.zip"},
-        %{run, "make"},
-        %{return, all}
-        {run, "echo this is cool"},
-        {run, "sleep 5"},
-        {run, "echo TESTING > %compname%"},
-        {return, {contents, "%compname%"}}
+  [ % Actions to take to capture output, done inside %compname% dir.
+        {run, "unzip %compname%.zip"},
+        {run, "make"},
+        {return, all}
+%        {run, "echo this is cool"},
+%        {run, "sleep 5"},
+%        {run, "echo TESTING > %compname%"},
   ],
   instance}.
 

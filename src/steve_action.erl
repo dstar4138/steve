@@ -64,13 +64,17 @@ do( {delete, RemoveObj}, Options, Vars ) ->
 %% This is a meta-command which doesn't really touch the os, but instead
 %% returns the file path of the file that needs to be added to the result
 %% message.
-do( {return, ReturnObj}, _Options, Vars ) ->
+do( {return, ReturnObj}, Options, Vars ) ->
     case ReturnObj of
-        all -> ok; %TODO: zip up all in working dir to ship back (THIS WILL 
-                   %  INCLUDE OLD ARCHIVE UNLESS IT WAS REMOVED).
-                   %TODO: Consider other options here such as lists of files. 
+        all -> 
+            CleanExec = fix_vars( cat(["zip -r result_%compname%.zip *; ",
+                                       "mv result_%compname%.zip ../."] ), 
+                                  Vars ),
+            do_exec( CleanExec, Options );
+            
+            %TODO: Consider other options here such as lists of files. 
         {contents, Path} ->
-            CleanPath = fix_vars( loc( c(Path), Vars ), Vars ),
+            CleanPath = fix_vars( loc( "%workingdir%/"++c(Path), Vars ), Vars ),
             Contents = readlines( CleanPath ),
             {mark_return, {value, Contents}};
         Path -> 
@@ -89,7 +93,7 @@ do( UnknownAction, _, _ ) ->
 %% @end
 do_exec( Exec, Options ) ->
     ?DEBUG("STEVE IS RUNNING: [~p] with the options: ~n~p",[Exec,Options]),
-    exec:run( Exec, Options ).
+    exec:run_link( Exec, Options ).
 
 
 %% @hidden
@@ -104,12 +108,17 @@ on_blacklist( Exec ) ->
 %% @end
 fix_vars( "", _ ) -> "";
 fix_vars( Cmd, Vars ) ->
+    ?DEBUG("STEVE FIX VARS: ~p -> ~p",[Cmd,Vars]),
     {Front, Rest} = lists:splitwith( fun( C ) -> C/=$% end, Cmd ),
     case Rest of
         "" -> Front;
         [$%|Check] -> 
             {Var,Back} = lists:splitwith( fun(C)-> C/=$% end, Check ), 
-            Front ++ replace(Var, Vars) ++ fix_vars(Back, Vars)
+            (case Back of 
+                 "" -> Front ++ Var;
+                 [$%|R] -> Front ++ replace(Var, Vars) ++ fix_vars( R, Vars )
+             end);
+        _ -> Front ++ fix_vars(Rest, Vars)
     end.
 replace( V, VL ) -> proplists:get_value( V, VL, V ).
 

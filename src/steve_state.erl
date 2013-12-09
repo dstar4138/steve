@@ -30,6 +30,10 @@
 %%% API
 %%%===================================================================
 
+
+computation_alert( finished, CompID ) ->
+    gen_server:cast( ?MODULE, {compalert, CompID, finished} ).
+
 %% @doc Check if a Client/Friend is connected via MQ and if they have valid
 %%      WRITE permission of a particular Computational ID. Used in the 
 %%      steve_ftp callback module for file transfers.
@@ -171,6 +175,9 @@ handle_call(_Request, _From, State) -> {noreply, State}.
 %% @doc Handles casted messages from spawned processes.
 %%--------------------------------------------------------------------
 -spec handle_cast( any(), #steve_state{} ) -> {noreply, #steve_state{}}.
+handle_cast( {compalert, CompID, Status}, State ) ->
+    handle_compalert( CompID, Status, State ),
+    {noreply, State};
 handle_cast( {temp_save, Msg}, State ) ->
     NewState = update_state( Msg, State ),
     {noreply, NewState};
@@ -291,3 +298,10 @@ trigger_computation( CID, #steve_state{cap_store=Store} = _State ) ->
                    [CID])
     end.
 
+
+handle_compalert( CompID, finished, _State ) ->
+    BCID = capi:uuid_encode(CompID),
+    Data = capi:encode(?CAPI_QRY_RET( [{<<"cid">>,BCID}] )),
+    pg:send(clients,{send, Data});
+
+handle_compalert( _,_,_ ) -> ok.

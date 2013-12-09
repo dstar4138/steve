@@ -15,12 +15,12 @@
          code_change/4]).
 %% Computation States.
 -export([ 'ARCHIVE_WAIT'/2, 'RUNNING'/2, 'WRAPUP'/2 ]).
--export([do_action/3]). %PRIVATE
+-export([do_action/4]). %PRIVATE
 -define(COMPS, comps_pg).
 
 %% TODO: Following should probably change based on computation ID.
 -define(WORKSPACE, steve_util:getrootdir()++"/compserve"). 
--define(EXEC_OPTS, [sync,monitor, {stdout,self()}, {cd, ?WORKSPACE}]).
+-define(EXEC_OPTS, [ monitor, {stdout,self()}, {cd, ?WORKSPACE}]).
 
 %% Computation Information.
 -record(state, { compID, actions=[], 
@@ -78,21 +78,24 @@ init([ComputationID,ActionList,HangForFile]) ->
 %%% =====================================================================
 'ARCHIVE_WAIT'( Event, State ) -> 
     %We ignore all event signals unless it's shutdown.
-    case Event of shutdown -> {stop, normal, State}; 
-                  _ -> {next_state, 'ARCHIVE_WAIT', State}
+    case Event of 
+        shutdown -> 
+            {stop, normal, State}; 
+        _ -> 
+            {next_state, 'ARCHIVE_WAIT', State}
     end.
 
 'RUNNING'( Event, State ) ->
     case Event of
         {action, Status} -> 
-                {NewStateName, NewState} = process_action( Status, State ),
-                {ok, NewStateName, NewState};
+            {NewStateName, NewState} = process_action( Status, State ),
+            {next_state, NewStateName, NewState};
         shutdown ->
             stop_actions( State ),
             {stop, normal};
         _ -> 
             report_unknown(Event, State),
-            {ok, 'RUNNING', State}
+            {next_state, 'RUNNING', State}
     end.
 
 'WRAPUP'(Event, State) ->
@@ -100,7 +103,8 @@ init([ComputationID,ActionList,HangForFile]) ->
         shutdown -> 
             hang_for_wrapup( State ),
             {stop, normal};
-        _ -> {ok, 'WRAPUP', State}
+        _ -> 
+            {next_state, 'WRAPUP', State}
     end.
 
 
@@ -168,18 +172,25 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 %%% Internal functions
 %%%===================================================================
 
+construct_workspace( State ) ->
+    steve_action:start(),
+    Args = update_args( steve_action:default_vars(), State ),
+    steve_action:do("mkdir %workingdir%", ?EXEC_OPTS, Args ),
+    steve_action:do("mv %compname%.zip %workingdir%/.", ?EXEC_OPTS, Args ).
+
 setup_state( ComputationID, ActionList ) ->
     #state{ compID = ComputationID,
             actions = ActionList,
             cur_action = nil,
             returns=[],
-            value=null
+            value=nil
           }.
 
 %% @hidden
 %% @doc Handle group messages from steve_comp_sup api.
 handle_group_msg( {archived_finished, CompID}, 'ARCHIVE_WAIT', 
                    #state{compID = CompID} = State ) ->
+    construct_workspace( State ),
     NewState = initialize_actions( State ),
     {next_state, 'STARTUP', NewState};
 handle_group_msg( Unknown, StateName, State ) ->
@@ -234,7 +245,7 @@ update_return( Path, #state{returns=Ps} =State ) ->
 %% @doc If there are any actions running request them be killed. We may want
 %%   to log about it here.
 %% @end  
-stop_actions( #state{ cur_action = Action } = State ) -> 
+stop_actions( #state{ cur_action = Action } = _State ) -> 
     case Action of 
         nil -> ok;
         _ -> kill( Action )
@@ -242,13 +253,13 @@ stop_actions( #state{ cur_action = Action } = State ) ->
 
 %% @hidden
 %% @doc Report that we have no idea what this event is.
-report_unknown( Event, State) -> ok. %TODO: This should probably change based on STATE.
+report_unknown( _Event, _State) -> ok. %TODO: This should probably change based on STATE.
 
 %% @hidden
 %% @doc Waits until the current_actions being performed are finished. This
 %%   Is important for the stability of the system.
 %% @end  
-hang_for_wrapup( State ) -> ok. %TODO: Will need to access steve_action internals.
+hang_for_wrapup( _State ) -> ok. %TODO: Will need to access steve_action internals.
 
 %% @hidden
 %% @doc Start up the first action in the list, or request shutdown.
@@ -272,15 +283,17 @@ kill( {_,Pid} ) -> Pid!kill, ok.
 %% @end  
 run_action( Action, State ) -> 
     steve_action:start(),
+    Opts = update_opts( ?EXEC_OPTS, State ),
     Args = update_args( steve_action:default_vars(), State ),
-    Pid = spawn_link( steve_comp, do_action, [self(), Action, Args] ),
+    Pid = spawn_link( steve_comp, do_action, [self(), Action, Opts, Args] ),
     {ok, Pid}.
 
 %% @hidden
 %% @doc A thread function which will execute the action and alert the FSM
 %%   if it returns immediately, or will start the watch_loop.
-do_action( Master, Action, Args ) ->
-    case steve_action:do( Action, ?EXEC_OPTS, Args ) of
+do_action( Master, Action, Opts, Args ) ->
+    process_flag( trap_exit, true ),
+    case steve_action:do( Action, Opts, Args ) of
         {error, Reason} -> 
             gen_fsm:send_event(Master, {action, {error, Reason}});
         {mark_return, Val} ->
@@ -300,21 +313,48 @@ watch_loop( Master, Pid ) ->
             gen_fsm:send_event(Master, {action, {finished, Status}});
         {stdout, _, Data} ->
             gen_fsm:send_event(Master, {action, {stdout, Data}}),
-            watch_loop( Master, Pid )
+            watch_loop( Master, Pid );
+        {'EXIT', _, Status} ->
+            gen_fsm:send_event( Master, {action, {finished, Status}});
+        Msg ->
+            ?DEBUG("Got unknown message to watch loop: ~p",[Msg]),
+            watch_loop( Master, Pid)
     end.
 
 %% @hidden
 %% @doc Ammends the State with the current state of the system.
 update_args( Args, #state{compID=ID} ) ->
-    EID = capi:uuid_encode(ID),
+    EID = erlang:binary_to_list(capi:uuid_encode(ID)),
     A = lists:keyreplace("compname",1,Args,{"compname",EID}),
-    lists:keyreplace("workingdir",1,A,{"workingdir",?WORKSPACE}).
+    lists:keyreplace("workingdir",1,A,{"workingdir",?WORKSPACE++"/"++EID}).
+
+%% @hidden
+%% @doc Ammends the Options with the current state of the system.
+update_opts( Opts, #state{compID=ID} ) ->
+   EID = erlang:binary_to_list(capi:uuid_encode(ID)),
+   lists:keyreplace(cd,1,Opts,{cd,?WORKSPACE++"/"++EID}). 
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% System Wide Result Updating.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-finished( CompID, State) -> ok.
-finished_with_error( CompID, Error ) -> ok.
-finished_with_archive( CompID ) -> ok.
-finished_with_result( CompID, Result ) -> ok.
+finished( CompID, #state{ value=V } = State) ->
+    case V of
+        nil -> wrapup_returns( CompID, State );
+        _   ->
+            save_value( CompID, V ),
+            wrapup_returns( CompID, State )
+    end,
+    steve_state:computation_alert(finished, CompID),
+    gen_fsm:send_event(self(), shutdown).
+
+%% TODO: Save the error as the value in the Value section, then replicate 
+%% result    
+finished_with_error( _CompID, _Error ) -> ok.
+
+%% TODO: Save the value in the db for replication
+save_value( _CompID, _V ) -> ok.
+
+%% TODO: Wrap up the tagged return files.
+wrapup_returns( _CompID, #state{returns=_R} ) -> ok.
+ 

@@ -214,6 +214,9 @@ handle_info( {pg_message, _From, ?CLIENT_GROUP, GroupMsg}, StateName,
             ?DEBUG("MQ got broadcasted shutdown message.", []),
             gen_tcp:close(S),
             {stop, normal, State};
+        {send, Data} ->
+            ok = send( S, Data ),
+            {next_state, StateName, State, ?TIMEOUT};
         {send, CliID, Data} ->
             (case steve_util:uuid_compare( CliID, Cid ) of
                 true ->
