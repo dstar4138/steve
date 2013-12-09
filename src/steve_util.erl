@@ -141,7 +141,8 @@ tilde_expand( Path ) -> Path.
 %% @hidden
 %% @doc Converts a string into binary by eatting two chars per loop.
 tobin( [], A )-> erlang:list_to_binary(lists:reverse(A));
-tobin( [X,Y|R], A )-> {ok,[B],_}=io_lib:fread("~16u", [X,Y]), tobin(R,[B|A]).
+tobin( [X,Y|R], A )-> {ok,[B],_}=io_lib:fread("~16u", [X,Y]), tobin(R,[B|A]);
+tobin( _, A) -> A.
 
 %% @hidden
 %% @doc Converts anything into a string for comparisons, etc.

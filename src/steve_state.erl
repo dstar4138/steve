@@ -47,11 +47,16 @@ peer_read_perm_check( _Peer, _CompID ) -> true. %TODO: verify peer has access
 
 %% @doc If an event happens on a particular file, namely if its finished
 %%  writing or reading, steve will most likely need to be informed.
+%%  Like if a computation is waiting for it to finish.
 %% @end
 -spec peer_file_event( uid(), tuple() ) -> ok.
 peer_file_event( CompID, Event ) ->
     ?DEBUG("Peer ~p file in repo: ~p",[Event, CompID]),
-    ok.
+    case Event of
+        finish_write -> 
+            steve_comp_sup:archive_upload_finished( CompID );
+        _ -> ok %Intentional ignore of finish_write. PAPI not finished.
+    end.
 
 %% @doc Ask the state server to process a client's message. This is called
 %% from steve_cmq:process/2.
@@ -133,7 +138,7 @@ handle_call({cmsg, Id, #capi_comp{ needsock=Files, cnt=Cnt}}, _From,
             #steve_state{out_req=Outs} = State ) ->
     CID = steve_util:uuid(),                      % Generate new Computation ID.
     steve_state_msg:broadcast_compeq( CID, Cnt ), % Broadcast new CompReq msg.
-    check_local_caplist( Id, CID, Cnt, State ),   % Check local capability.
+    check_local_caplist( Files, Id, CID, Cnt, State ), % Check local capability.
     Reply =
         if Files -> % If Client has files to send over, open a connection and inform
              case steve_ftp:get_conn_port() of
@@ -233,8 +238,8 @@ update_state( {waiting_acceptors, CID, FriendConn},
     ClientID = proplists:get_value( CID, Outs ), 
     notify_client(ClientID, {compack, FriendConn, CID}),
     State#steve_state{ waiting_acceptors=[{CID, FriendConn}|Waits] };
-update_state( {cap_req, Hash, Cap}, #steve_state{ cap_store=C } = State ) ->
-    State#steve_state{ cap_store=[{Hash,Cap}|C] };
+update_state( {cap_req, Hash, Cap, F}, #steve_state{ cap_store=C } = State ) ->
+    State#steve_state{ cap_store=[{Hash,Cap,F}|C] };
 update_state( Unknown, State ) ->
     ?DEBUG("Unknown state update message: ~p",[Unknown]),
     State.
@@ -244,13 +249,14 @@ update_state( Unknown, State ) ->
 %%   able to handle it, then we'll message the Client with a CompAck 
 %%   notification.
 %% @end  
-check_local_caplist( ClientId, CID, RawCnt, #steve_state{ caps=CapStruct } ) ->
+check_local_caplist( HangForArchive, ClientId, CID, RawCnt, 
+                     #steve_state{ caps=CapStruct } ) ->
    spawn( fun() -> 
         Request = capi:ref_def_map( RawCnt ),
         case requests:match( CapStruct, Request ) of
             {ok, nomatch} -> ok;
             {ok, Act} ->
-                temp_save( {cap_req, CID, Act } ),
+                temp_save( {cap_req, CID, Act, HangForArchive } ),
                 notify_client( ClientId, {compack, my_contact_info(), CID} );
             {error, badcaps} ->
                 ?ERROR("steve_state:check_local_caplist",
@@ -277,7 +283,8 @@ tonote( _ ) -> nil.
 %% @doc called from steve_state_msg:handle_note(CompAccept).
 trigger_computation( CID, #steve_state{cap_store=Store} = _State ) ->
     case lists:keyfind( CID, 1, Store ) of
-        {_, ActionList} -> steve_comp_sup:start_computation( CID, ActionList );
+        {_, ActionList, WaitForArchive} -> 
+            steve_comp_sup:start_computation( CID, ActionList, WaitForArchive );
         false -> 
             ?ERROR("steve_state:trigger_computation",
                    "Attempting to trigger a computation we didn't accept: ~p",

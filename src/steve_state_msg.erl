@@ -50,6 +50,7 @@ handle_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
 %% @doc Handle a notification message and update state.
 handle_note( "CompAccept", Cnt, #steve_state{waiting_acceptors=Waiters} = State )->
+    
     CID = capi:uuid_decode( proplists:get_value(<<"cid">>,Cnt) ),
     FriendInfo = proplists:get_value(<<"friend">>,Cnt),
     case check_if_self( FriendInfo ) of

@@ -11,8 +11,13 @@
 -module(steve_action).
 
 -include("debug.hrl").
+-define(OPTS, [ debug ] ).
 
+-export( [start/0] ).
 -export( [do/3, default_vars/0] ).
+
+%% @doc Start up the Exec port so that we can run external OS processes.
+start() -> exec:start( ?OPTS ).
 
 %% @doc Due to the complications that would arrise if variables were not 
 %%   present It would be a good idea to use the proplist returned and modify
@@ -84,7 +89,7 @@ do( UnknownAction, _, _ ) ->
 %% @end
 do_exec( Exec, Options ) ->
     ?DEBUG("STEVE IS RUNNING: [~p] with the options: ~n~p",[Exec,Options]),
-    {attempted, erlexec:run( Exec, Options )}.
+    exec:run( Exec, Options ).
 
 
 %% @hidden

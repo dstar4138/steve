@@ -11,10 +11,13 @@
 
 %% API
 -export([start_link/0]).
--export([start_computation/1, stop_computation/1]).
+-export([start_computation/3, stop_computation/1]).
+-export([archive_upload_finished/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
+
+-define(COMPS, comps_pg).
 
 %%%===================================================================
 %%% API functions
@@ -30,6 +33,11 @@
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+
+archive_upload_finished( CompID ) ->
+    pg:send( ?COMPS, {archive_finished, CompID} ).
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %%  Starts a computation worker process.
@@ -37,9 +45,11 @@ start_link() ->
 %% @spec start_computation( ActionList ) -> {ok, Pid} 
 %% @end
 %%--------------------------------------------------------------------
-start_computation( Args ) ->
-    ?DEBUG("Starting Computation (~p)~n",[Args]),
-    supervisor:start_child(?MODULE, Args).
+start_computation( CID, ActionList, StartHang ) ->
+    ?DEBUG("Starting Computation (~p) -> ~p",[CID, ActionList]),
+    {ok, Pid} = supervisor:start_child(?MODULE, [CID, ActionList, StartHang]),
+    pg:join( ?COMPS, Pid ),
+    {ok, Pid}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -49,7 +59,7 @@ start_computation( Args ) ->
 %% @end
 %%--------------------------------------------------------------------
 stop_computation( Pid ) ->
-    ?DEBUG("Stopping Computation (~p)~n", [Pid]),
+    ?DEBUG("Stopping Computation (~p)", [Pid]),
     supervisor:stop_child(?MODULE, Pid).
 
 
@@ -70,7 +80,8 @@ stop_computation( Pid ) ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([]) -> 
+init([]) ->
+    ok = start_comp_pg(), 
     % Don't start computations on your own 
     % (steve_state will tell you). If this crashes
     % we're gunna have a bad time, so handle later.
@@ -85,3 +96,10 @@ init([]) ->
 
     {ok, { SupFlags, [ Worker ] }}.
 
+
+start_comp_pg() -> 
+    case pg:create(?COMPS) of
+        ok -> ok;
+        {error, already_created} -> ok;
+        Err -> Err
+    end.
