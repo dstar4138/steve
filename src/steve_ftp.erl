@@ -137,6 +137,7 @@ validate_options( _, _, _ ) -> false.
 %% @hidden 
 %% @doc Extract the UUID from the Filename by doing easier binary matching.
 get_compid( L ) when is_list( L ) -> get_compid( erlang:list_to_binary( L ) );
+get_compid( <<"result_", R/binary>> ) -> get_compid( R );
 get_compid( << Name:(36*8), ".zip" >> ) -> % If file has dashes like normal uuid
     {ok, steve_util:bits_to_uuid( Name ) };
 get_compid( << Name:(32*8), ".zip" >> ) -> % If the file is missing dashes.

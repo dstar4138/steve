@@ -49,7 +49,8 @@ handle_query( {cid, CID}, State ) ->
 handle_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
 
 check_result( #steve_state{temp_persist=Persist}, CID ) ->
-    lists:member( CID, 1, Persist );
+    BCID = capi:uuid_decode( CID ),
+    lists:member( BCID, Persist );
 check_result( _, _ ) -> false. %TODO: SHOULD CHECK DB.
 
 %% @doc Handle a notification message and update state.
