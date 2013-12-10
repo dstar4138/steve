@@ -44,9 +44,13 @@ forward( ExcludedFriend, Msg ) ->
 %% @doc Handle a query and respond.
 handle_query( peers, _ )   -> {reply, ?CAPI_QRY_RET( steve_conn:get_friend_count() )};
 handle_query( clients, _ ) -> {reply, ?CAPI_QRY_RET( steve_conn:get_client_count() )};
-handle_query( {cid, CID}, #steve_state{db=DB} ) -> 
-    {reply, ?CAPI_QRY_RET( steve_db:check_cid(DB, CID) )};
+handle_query( {cid, CID}, State ) -> 
+    {reply, ?CAPI_QRY_RET( check_result(State, CID) )};
 handle_query( _, _ ) -> {reply, ?CAPI_QRY_ERR( <<"Unknown Query">> )}.
+
+check_result( #steve_state{temp_persist=Persist}, CID ) ->
+    lists:member( CID, 1, Persist );
+check_result( _, _ ) -> false. %TODO: SHOULD CHECK DB.
 
 %% @doc Handle a notification message and update state.
 handle_note( "CompAccept", Cnt, #steve_state{waiting_acceptors=Waiters} = State )->

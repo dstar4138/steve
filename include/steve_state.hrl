@@ -20,7 +20,10 @@
                         %% outstanding requests we save them until they are
                         %% accepted by the client or the computation is removed
                         %% from out_req.
-                        waiting_acceptors = [] % { ComputationID, FriendConn }
+                        waiting_acceptors = [], % { ComputationID, FriendConn }
+
+                        %% Minor hack for temporary persistence.
+                        temp_persist = [] % { ComputationID, HasResult }
                      }).
 
 

@@ -178,8 +178,8 @@ handle_call(_Request, _From, State) -> {noreply, State}.
 %%--------------------------------------------------------------------
 -spec handle_cast( any(), #steve_state{} ) -> {noreply, #steve_state{}}.
 handle_cast( {compalert, CompID, Status}, State ) ->
-    handle_compalert( CompID, Status, State ),
-    {noreply, State};
+    NewState = handle_compalert( CompID, Status, State ),
+    {noreply, NewState};
 handle_cast( {temp_save, Msg}, State ) ->
     NewState = update_state( Msg, State ),
     {noreply, NewState};
@@ -301,9 +301,11 @@ trigger_computation( CID, #steve_state{cap_store=Store} = _State ) ->
     end.
 
 
-handle_compalert( CompID, finished, _State ) ->
+handle_compalert( CompID, finished, #steve_state{temp_persist=P} = State ) ->
+    NewState = State#steve_state{ temp_persist=[CompID|P] },
     BCID = capi:uuid_encode(CompID),
     Data = capi:encode(?CAPI_QRY_RET( [{<<"cid">>,BCID}] )),
-    pg:send(clients,{send, Data});
+    pg:send(clients,{send, Data}),
+    NewState;
 
 handle_compalert( _,_,_ ) -> ok.
