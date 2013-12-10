@@ -149,7 +149,8 @@ handle_sync_event( Event, _From, StateName, State) ->
 %%--------------------------------------------------------------------
 handle_info( {pg_message, _From, ?COMPS, GroupMsg}, StateName, State ) ->
     handle_group_msg( GroupMsg, StateName, State );
-handle_info(_Info, StateName, State) ->
+handle_info( Info, StateName, State) ->
+    ?DEBUG("Unknown info message: ~p",[Info]),
     {next_state, StateName, State}.
 
 
@@ -175,8 +176,8 @@ code_change(_OldVsn, StateName, State, _Extra) -> {ok, StateName, State}.
 construct_workspace( State ) ->
     steve_action:start(),
     Args = update_args( steve_action:default_vars(), State ),
-    steve_action:do("mkdir %workingdir%", ?EXEC_OPTS, Args ),
-    steve_action:do("mv %compname%.zip %workingdir%/.", ?EXEC_OPTS, Args ).
+    steve_action:do({run, "mkdir %workingdir%"}, ?EXEC_OPTS, Args ),
+    steve_action:do({run, "mv %compname%.zip %workingdir%/."}, ?EXEC_OPTS, Args ).
 
 setup_state( ComputationID, ActionList ) ->
     #state{ compID = ComputationID,
@@ -188,11 +189,11 @@ setup_state( ComputationID, ActionList ) ->
 
 %% @hidden
 %% @doc Handle group messages from steve_comp_sup api.
-handle_group_msg( {archived_finished, CompID}, 'ARCHIVE_WAIT', 
+handle_group_msg( {archive_finished, CompID}, 'ARCHIVE_WAIT', 
                    #state{compID = CompID} = State ) ->
     construct_workspace( State ),
-    NewState = initialize_actions( State ),
-    {next_state, 'STARTUP', NewState};
+    {S,I} = start_next( State ),
+    {next_state, S, I};
 handle_group_msg( Unknown, StateName, State ) ->
     ?DEBUG("Unknown Group Message: ~p", [Unknown]),
     {next_state, StateName, State}.
@@ -262,18 +263,6 @@ report_unknown( _Event, _State) -> ok. %TODO: This should probably change based 
 hang_for_wrapup( _State ) -> ok. %TODO: Will need to access steve_action internals.
 
 %% @hidden
-%% @doc Start up the first action in the list, or request shutdown.
-initialize_actions( #state{ actions=L } = State ) ->
-    case L of
-        [H|R] -> 
-            {ok, Handle} = run_action( H, State ),
-            State#state{actions=R, cur_action={H, Handle}};
-        [] ->
-            gen_fsm:send_event( self(), shutdown ),
-            State
-    end.
-
-%% @hidden
 %% @doc Yeah I'm hardcore like that.
 kill( {_,Pid} ) -> Pid!kill, ok.
 
@@ -282,7 +271,6 @@ kill( {_,Pid} ) -> Pid!kill, ok.
 %%   send them back to the FSM.
 %% @end  
 run_action( Action, State ) -> 
-    steve_action:start(),
     Opts = update_opts( ?EXEC_OPTS, State ),
     Args = update_args( steve_action:default_vars(), State ),
     Pid = spawn_link( steve_comp, do_action, [self(), Action, Opts, Args] ),
@@ -293,6 +281,7 @@ run_action( Action, State ) ->
 %%   if it returns immediately, or will start the watch_loop.
 do_action( Master, Action, Opts, Args ) ->
     process_flag( trap_exit, true ),
+    steve_action:start(),
     case steve_action:do( Action, Opts, Args ) of
         {error, Reason} -> 
             gen_fsm:send_event(Master, {action, {error, Reason}});

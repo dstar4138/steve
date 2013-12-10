@@ -14,7 +14,7 @@
 %% API
 -export([start_link/1]).
 -export([process_cmsg/2, process_fmsg/2]).
--export([peer_write_perm_check/2, 
+-export([peer_write_perm_check/2,peer_perm_check/3, 
          peer_read_perm_check/2,
          peer_file_event/2]).
 
@@ -33,6 +33,8 @@
 
 computation_alert( finished, CompID ) ->
     gen_server:cast( ?MODULE, {compalert, CompID, finished} ).
+
+peer_perm_check(_,_,_) -> true.
 
 %% @doc Check if a Client/Friend is connected via MQ and if they have valid
 %%      WRITE permission of a particular Computational ID. Used in the 
@@ -57,9 +59,9 @@ peer_read_perm_check( _Peer, _CompID ) -> true. %TODO: verify peer has access
 peer_file_event( CompID, Event ) ->
     ?DEBUG("Peer ~p file in repo: ~p",[Event, CompID]),
     case Event of
-        finish_write -> 
+        {finish_write, _, _} -> 
             steve_comp_sup:archive_upload_finished( CompID );
-        _ -> ok %Intentional ignore of finish_write. PAPI not finished.
+        _ -> ok %Intentional ignore of finish_read. PAPI not finished.
     end.
 
 %% @doc Ask the state server to process a client's message. This is called
