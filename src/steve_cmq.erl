@@ -12,7 +12,7 @@
 -include("debug.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 -export([set_socket/3, send_to_client/2]).
 -export([get_conn_details/1]).
 
@@ -41,6 +41,10 @@
 %% Default Group.
 -define( CLIENT_GROUP, clients ). %LATER: Abstract out of this module.
 
+-define(MOD( CliID ), erlang:list_to_atom("cli_" ++ 
+                                          steve_util:uuid_to_str(CliID))). 
+
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -63,8 +67,8 @@ get_conn_details( PID ) ->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    gen_fsm:start_link({local, ?MODULE}, ?MODULE, [], []).
+start_link( ClientID ) ->
+    gen_fsm:start_link({local, ?MOD(ClientID)}, ?MODULE, [], []).
 
 %%--------------------------------------------------------------------
 %% @doc Set an instance of this Message Queue's socket. This should

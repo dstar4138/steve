@@ -22,6 +22,9 @@
 -define(WORKSPACE, steve_util:getrootdir()++"/compserve"). 
 -define(EXEC_OPTS, [ monitor, {stdout,self()}, {cd, ?WORKSPACE}]).
 
+-define(MOD( CID ), erlang:list_to_atom( "comp_"++
+                                         steve_util:uuid_to_str( CID ))).
+
 %% Computation Information.
 -record(state, { compID, actions=[], 
                  cur_action=nil, sub_vars=[], 
@@ -41,9 +44,8 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(ComputationID, ActionList, HangForFile) ->
-    gen_fsm:start_link({local, ?MODULE}, ?MODULE, [ComputationID,
-                                                   ActionList,
-                                                   HangForFile], []).
+    gen_fsm:start_link({local, ?MOD( ComputationID )}, 
+                       ?MODULE, [ComputationID, ActionList, HangForFile], []).
 
 %%%===================================================================
 %%% gen_fsm callbacks

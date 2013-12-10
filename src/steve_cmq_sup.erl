@@ -45,7 +45,7 @@ start_link() -> supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 %%--------------------------------------------------------------------
 start_mq( Group, ClientID, Socket ) ->
     ?DEBUG("Starting Mq (~p)~n",[[ClientID, Socket]]),
-    {ok, Pid} = supervisor:start_child(?MODULE, []), % Start MQ.
+    {ok, Pid} = supervisor:start_child(?MODULE, [ ClientID]), % Start MQ.
     ?DEBUG("Setting MQ Socket",[]),
     ok = ?MQ:set_socket( Pid, ClientID, Socket ),    % Give it the socket.
     ?DEBUG("Setting Controlling process for socket",[]),
