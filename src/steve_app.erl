@@ -32,10 +32,10 @@
 start(_StartType, StartArgs) ->
     ?DEBUG("Checking user starting Steve..,", []),
     ok = check_user(),
-    ?DEBUG("Starting Inets service for TFTP...",[]),
-    {ok, _Pid} = startup_inets(),
     ?DEBUG("Starting Local persistant storage service...",[]),
     System = startup_mnesia(),
+    ?DEBUG("Starting Inets service for TFTP...",[]),
+    {ok, _Pid} = startup_inets(),
     ?DEBUG("Starting Steve Daemon...",[]),
     steve_sup:start_link( System, StartArgs ).
 
