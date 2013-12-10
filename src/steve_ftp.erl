@@ -186,6 +186,8 @@ fix_env_configs( L ) -> fix_env_configs( L, [] ).
 fix_env_configs( [], A ) -> A;
 fix_env_configs( [{root_dir, Val}|R], A ) -> 
     % Turn the root_dir value into the callback value.
+    {root_dir, RootDir} = ?ROOTDIR,
+    filelib:ensure_dir( RootDir ),
     fix_env_configs(R,[?CALLBACK(Val)|A]);
 fix_env_configs( [X = {Option, _Value}|R], A ) ->
     case lists:member( Option, [ port, debug, max_conn, logger ] ) of
