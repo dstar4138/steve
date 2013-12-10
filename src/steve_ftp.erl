@@ -126,7 +126,7 @@ validate_options( Peer, write, FileName ) ->
         {ok, CompID} -> steve_state:peer_perm_check( write, Peer, CompID );
         _ -> false
     end;
-validate_options( Peer, read, "res." ++ FileName ) -> %Filename needs 'res.'
+validate_options( Peer, read, "result_" ++ FileName ) -> %Filename needs 'res.'
     case get_compid( FileName ) of
         {ok, CompID} -> steve_state:peer_perm_check( read, Peer, CompID );
         _ -> false

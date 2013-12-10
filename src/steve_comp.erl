@@ -177,7 +177,7 @@ construct_workspace( State ) ->
     steve_action:start(),
     Args = update_args( steve_action:default_vars(), State ),
     steve_action:do({run, "mkdir %workingdir%"}, ?EXEC_OPTS, Args ),
-    steve_action:do({run, "mv %compname%.zip %workingdir%/."}, ?EXEC_OPTS, Args ).
+    steve_action:do({run, "cp %compname%.zip %workingdir%/."}, ?EXEC_OPTS, Args ).
 
 setup_state( ComputationID, ActionList ) ->
     #state{ compID = ComputationID,
