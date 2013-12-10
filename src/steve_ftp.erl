@@ -35,7 +35,10 @@
 -spec get_config() -> string().
 get_config() -> % TODO: get from RC file.
     case application:get_env(steve, tftp) of
-        undefined -> ?DEFAULT_CONFIG;
+        undefined -> 
+            {_, Dir} = ?ROOTDIR,
+            ok = filelib:ensure_dir( Dir++"/" ),
+            ?DEFAULT_CONFIG;
         {ok, P} -> fix_env_configs( P )
     end.
 
@@ -182,15 +185,22 @@ trigger( Action, {FileName}, FileSize ) ->
 
 %% @hidden
 %% @doc Fixes the read in environment to pull out options that we don't except.
-fix_env_configs( L ) -> fix_env_configs( L, [] ).
+fix_env_configs( L ) -> lists:foreach( fun ensure_dir_exists/1, 
+                                       fix_env_configs( L, [] ) ).
 fix_env_configs( [], A ) -> A;
 fix_env_configs( [{root_dir, Val}|R], A ) -> 
     % Turn the root_dir value into the callback value.
-    {root_dir, RootDir} = ?ROOTDIR,
-    filelib:ensure_dir( RootDir ),
     fix_env_configs(R,[?CALLBACK(Val)|A]);
 fix_env_configs( [X = {Option, _Value}|R], A ) ->
     case lists:member( Option, [ port, debug, max_conn, logger ] ) of
         true -> fix_env_configs(R,[X|A]);
         false -> fix_env_configs(R,A)
     end.
+
+ensure_dir_exists( {callback,{_,_,[Dir]}} ) ->
+    R = filelib:ensure_dir( Dir++"/" ),
+    ?DEBUG("TFTP File repo creation: ~p",[R]);
+ensure_dir_exists( R ) -> 
+    ?DEBUG("TFTP Option: ~p",[R]),
+    ok.
+
