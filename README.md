@@ -79,6 +79,8 @@ the Erlang shell, or the following GUI:
   Uses Xamarin library and can be built for several different platforms 
   including Android.
 
+* [Windows Steve Client](https://github.com/pdg6868/SteveClientWindows) -
+    A straight up windows client using XAML and C#.
 
 ## BUILDING: ##
 
